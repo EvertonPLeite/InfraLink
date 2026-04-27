@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, Lock, ArrowLeft, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
-import { api } from '../lib/api';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -35,7 +34,15 @@ export default function ResetPassword() {
     setError('');
 
     try {
-      await api.post('/api/auth/reset-password', { email, token, newPassword: password });
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, token, newPassword: password })
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.message);
+
       setSuccess(true);
       setTimeout(() => navigate('/admin/login'), 3000);
     } catch (err: any) {

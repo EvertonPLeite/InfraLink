@@ -3,7 +3,6 @@ import { Menu, X, Lock, Instagram } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { Logo } from './Logo';
-import { api } from '../lib/api';
 
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -11,7 +10,8 @@ export default function Header() {
   const [content, setContent] = useState<any>(null);
 
   useEffect(() => {
-    api.get('/api/content')
+    fetch('/api/content')
+      .then(res => res.json())
       .then(data => setContent(data.general));
 
     const handleScroll = () => setIsScrolled(window.scrollY > 20);

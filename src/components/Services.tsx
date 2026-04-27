@@ -1,7 +1,6 @@
 import { motion } from 'motion/react';
 import { Wifi, ShieldCheck, Database, Headset, Battery, Satellite, Link, HelpCircle, HardDrive, Cpu, Globe, Zap, Camera, Video, Share2, Radio, Link as LinkIcon, Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
 
 const iconMap: any = {
   'Wifi': Wifi,
@@ -37,7 +36,8 @@ export default function Services() {
   const [services, setServices] = useState<any[]>([]);
 
   useEffect(() => {
-    api.get('/api/services')
+    fetch('/api/services')
+      .then(res => res.json())
       .then(data => setServices(data));
   }, []);
 

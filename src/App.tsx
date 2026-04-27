@@ -9,17 +9,14 @@ import Dashboard from './admin/Dashboard';
 import ResetPassword from './admin/ResetPassword';
 import { Instagram } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
-import { api } from './lib/api';
 
 function LandingPage() {
   const [content, setContent] = useState<any>(null);
 
   useEffect(() => {
-    api.get('/api/content')
-      .then(data => setContent(data.footer))
-      .catch(() => {
-        // Error already handled by toast in fetchApi
-      });
+    fetch('/api/content')
+      .then(res => res.json())
+      .then(data => setContent(data.footer));
   }, []);
 
   return (

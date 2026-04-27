@@ -1,7 +1,6 @@
 import { motion } from 'motion/react';
 import { MessageSquare, Phone, Send, MapPin, ExternalLink, ArrowRight, Instagram } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
 
 export default function Contact() {
   const [qrCode, setQrCode] = useState('');
@@ -9,14 +8,16 @@ export default function Contact() {
 
   useEffect(() => {
     console.log('Contact component mounted, fetching content...');
-    api.get('/api/content')
+    fetch('/api/content')
+      .then(res => res.json())
       .then(data => {
         console.log('Content fetched:', data.contact);
         setContent(data.contact);
         const waUrl = data.contact?.whatsapp_url || 'https://wa.me/5535988019507';
         console.log('Fetching QR from server for:', waUrl);
         
-        api.get(`/api/qrcode?text=${encodeURIComponent(waUrl)}`)
+        fetch(`/api/qrcode?text=${encodeURIComponent(waUrl)}`)
+          .then(res => res.json())
           .then(qrData => {
             if (qrData.url) {
               console.log('QR Code fetched from server successfully');
