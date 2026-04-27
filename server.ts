@@ -260,42 +260,67 @@ async function startServer() {
 
   // --- API Routes ---
 
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', db: !!db, supabase: !!supabase });
+  });
+
+  app.get('/api/diag', (req, res) => {
+    res.json({
+      node_env: process.env.NODE_ENV,
+      port: PORT,
+      cwd: process.cwd(),
+      time: new Date().toISOString(),
+      supabase_initialized: !!supabase
+    });
+  });
+
   // Auth: Login Phase 1
   app.post('/api/auth/login', async (req, res) => {
     try {
+      console.log('--- LOGIN ROUTE HIT ---');
       const { username, password } = req.body;
-      console.log(`Login attempt for user: ${username}`);
+      console.log(`Payload received: username=${username}, password=${password ? 'PRESENT' : 'MISSING'}`);
       
+      if (!username || !password) {
+        return res.status(400).json({ message: 'Usuário e senha são obrigatórios' });
+      }
+
       let user;
       if (supabase) {
+        console.log('Querying Supabase for user...');
         const { data, error } = await supabase.from('users').select('*').eq('username', username).maybeSingle();
-        if (error) return res.status(500).json({ message: error.message });
+        if (error) {
+          console.error('Supabase query error:', error);
+          return res.status(500).json({ message: error.message });
+        }
         user = data;
       } else {
+        console.log('Querying SQLite for user...');
         user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
       }
       
       if (!user) {
-        console.log('User not found');
+        console.log('User not found in database');
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
+      console.log('User found, comparing passwords...');
       if (!bcrypt.compareSync(password, user.password_hash)) {
-        console.log('Invalid password');
+        console.log('Password mismatch');
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
       if (!user.two_factor_enabled) {
         const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1d' });
-        console.log('Login successful, no 2FA');
+        console.log('Login successful (no 2FA)');
         return res.json({ token, requires2FA: false });
       }
 
-      console.log('Login phase 1 successful, requires 2FA');
+      console.log('Login success (requires 2FA)');
       res.json({ requires2FA: true, userId: user.id });
-    } catch (error) {
-      console.error('Login error:', error);
-      res.status(500).json({ message: 'Erro interno no servidor' });
+    } catch (error: any) {
+      console.error('CRITICAL LOGIN ERROR:', error);
+      res.status(500).json({ message: `Erro interno: ${error.message}` });
     }
   });
 
