@@ -22,16 +22,27 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
 // Supabase Setup
 let supabase: any = null;
-if (SUPABASE_URL && SUPABASE_URL.trim() !== '' && SUPABASE_KEY && SUPABASE_KEY.trim() !== '') {
+
+const isValidSupabaseConfig = (url: string | undefined, key: string | undefined) => {
+  if (!url || !key || url.trim() === '' || key.trim() === '') return false;
   try {
-    supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-    console.log('Supabase client initialized');
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch (e) {
+    return false;
+  }
+};
+
+if (isValidSupabaseConfig(SUPABASE_URL, SUPABASE_KEY)) {
+  try {
+    supabase = createClient(SUPABASE_URL!, SUPABASE_KEY!);
+    console.log('Supabase client initialized successfully');
   } catch (err) {
     console.error('Failed to initialize Supabase client:', err);
     supabase = null;
   }
 } else {
-  console.log('Supabase credentials missing or empty, falling back to SQLite');
+  console.log('Supabase credentials missing, invalid or empty. Falling back to SQLite.');
 }
 
 // Database Setup (SQLite fallback)
@@ -250,15 +261,35 @@ if (db.prepare('SELECT COUNT(*) as count FROM services').get().count === 0) {
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
-
-  // Log all requests
+  
+  // Log all requests - First thing!
   app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    console.log(`[REQUEST] ${new Date().toISOString()} - ${req.method} ${req.url}`);
     next();
   });
 
+  app.get('/diag-server', (req, res) => {
+    res.send('Server is alive!');
+  });
+
+  app.get('/diag-routes', (req, res) => {
+    const routes = app._router.stack
+      .filter((r: any) => r.route)
+      .map((r: any) => ({
+        path: r.route.path,
+        methods: r.route.methods
+      }));
+    res.json(routes);
+  });
+
+  app.use(express.json());
+
   // --- API Routes ---
+
+  app.get('/api/ping', (req, res) => {
+    console.log('PING hit');
+    res.json({ message: 'pong', time: new Date().toISOString() });
+  });
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', db: !!db, supabase: !!supabase });
@@ -276,8 +307,13 @@ async function startServer() {
 
   // Auth: Login Phase 1
   app.post('/api/auth/login', async (req, res) => {
+    console.log('--- LOGIN ROUTE ATTEMPT ---');
+    console.log('Method:', req.method);
+    console.log('URL:', req.url);
+    console.log('Headers:', JSON.stringify(req.headers));
+    console.log('Body:', JSON.stringify(req.body));
+
     try {
-      console.log('--- LOGIN ROUTE HIT ---');
       const { username, password } = req.body;
       console.log(`Payload received: username=${username}, password=${password ? 'PRESENT' : 'MISSING'}`);
       

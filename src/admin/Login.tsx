@@ -38,7 +38,9 @@ export default function Login() {
       } else {
         const text = await res.text();
         console.error('Non-JSON response received:', text);
-        throw new Error(`Erro no servidor: ${res.status} ao chamar ${url}. O servidor não retornou JSON.`);
+        // Expose first 50 chars of body to help debug
+        const bodySnippet = text.substring(0, 50).replace(/[<>]/g, '');
+        throw new Error(`Erro no servidor: ${res.status} ao chamar ${url}. Corpo: ${bodySnippet}...`);
       }
 
       if (!res.ok) throw new Error(data.message || 'Erro desconhecido');
