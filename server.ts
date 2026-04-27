@@ -290,6 +290,23 @@ async function startServer() {
 
   api.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
+  api.get('/qrcode', async (req, res) => {
+    const { text } = req.query;
+    console.log(`QR Code requested for: ${text}`);
+    if (!text) return res.status(400).send('Text is required');
+    try {
+      const url = await QRCode.toDataURL(String(text), {
+        color: { dark: '#00FF88', light: '#FFFFFF' },
+        width: 400,
+        margin: 2
+      });
+      res.json({ url });
+    } catch (err) {
+      console.error('QR Generation Error:', err);
+      res.status(500).send('Failed to generate QR code');
+    }
+  });
+
   api.post('/auth/login', async (req, res) => {
     console.log('API: Login attempt', req.body.username);
     try {

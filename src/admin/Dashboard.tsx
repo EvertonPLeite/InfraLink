@@ -2,7 +2,25 @@ import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Trash2, Shield, ArrowLeft, Save, Loader2, Link2, BarChart3, Wifi, Globe, Zap, Satellite, Camera, Video, Battery, Database, Headset, Cpu, HardDrive, Share2, Radio, Link as LinkIcon, Activity, Users, Calendar, MapPin, DollarSign } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, PieChart, Pie } from 'recharts';
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-[#111] border border-white/10 p-4 rounded-2xl shadow-2xl backdrop-blur-xl">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-2">{label}</p>
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: payload[0].fill || payload[0].color }} />
+          <p className="text-sm font-bold">
+            {payload[0].value} <span className="text-white/40 font-medium">Cliques</span>
+          </p>
+        </div>
+        <p className="text-[10px] text-white/30 mt-2 font-medium italic">Baseado nos últimos 7 dias</p>
+      </div>
+    );
+  }
+  return null;
+};
 
 function FinancialSummary({ customers, inventory = [] }: { customers: any[], inventory?: any[] }) {
   const calculateStats = () => {
@@ -47,27 +65,67 @@ function FinancialSummary({ customers, inventory = [] }: { customers: any[], inv
 
   const stats = calculateStats();
 
+  const pieData = [
+    { name: 'Custo Operacional', value: stats.totalOpsCost, color: '#fb923c' },
+    { name: 'Investimento', value: stats.totalInventoryInvestment, color: '#60a5fa' },
+    { name: 'Lucro Lqd', value: Math.max(0, stats.profit), color: '#00FF88' },
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Receita Total</p>
-          <div className="text-2xl font-black tracking-tighter">R$ {stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-        
-        <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Custos Operacionais</p>
-          <div className="text-2xl font-black tracking-tighter text-orange-400">R$ {stats.totalOpsCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Receita Total</p>
+            <div className="text-2xl font-black tracking-tighter">R$ {stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          </div>
+          
+          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Custos Operacionais</p>
+            <div className="text-2xl font-black tracking-tighter text-orange-400">R$ {stats.totalOpsCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          </div>
+
+          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Investimento Equip.</p>
+            <div className="text-2xl font-black tracking-tighter text-blue-400">R$ {stats.totalInventoryInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          </div>
+
+          <div className="glass-panel p-6 rounded-[2rem] border-brand-neon/20 bg-brand-neon/5">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon/60 mb-2">Lucro Líquido</p>
+            <div className="text-2xl font-black tracking-tighter text-brand-neon">R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          </div>
         </div>
 
-        <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Investimento Equip.</p>
-          <div className="text-2xl font-black tracking-tighter text-blue-400">R$ {stats.totalInventoryInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-
-        <div className="glass-panel p-6 rounded-[2rem] border-brand-neon/20 bg-brand-neon/5">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon/60 mb-2">Lucro Líquido</p>
-          <div className="text-2xl font-black tracking-tighter text-brand-neon">R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+        <div className="glass-panel p-6 rounded-[2rem] border-white/5 flex flex-col items-center justify-center min-h-[250px]">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-4 self-start">Distribuição Financeira</p>
+          <div className="w-full h-full min-h-[200px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  contentStyle={{ background: '#111', border: '1px solid #333', borderRadius: '12px' }}
+                  itemStyle={{ color: '#fff' }}
+                />
+                <Legend 
+                  verticalAlign="bottom" 
+                  height={36}
+                  iconType="circle"
+                  formatter={(value) => <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">{value}</span>}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
@@ -404,6 +462,7 @@ function ManageCustomers() {
 function Analytics() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/stats/plan-clicks', {
@@ -420,34 +479,76 @@ function Analytics() {
 
   return (
     <div className="space-y-12">
-      <h2 className="text-3xl font-black tracking-tighter">Clicks nos <span className="text-brand-neon">Planos</span></h2>
+      <h2 className="text-3xl font-black tracking-tighter">Interações <span className="text-brand-neon">& Cliques</span></h2>
       
-      <div className="glass-panel p-8 rounded-[3rem] h-[400px]">
-        <div className="mb-6">
-           <h3 className="font-bold uppercase tracking-widest text-xs text-white/40">Cliques por Dia da Semana (Últimos 7 dias)</h3>
+      <div className="glass-panel p-8 rounded-[3rem] h-[450px]">
+        <div className="mb-8 flex items-center justify-between">
+           <div>
+             <h3 className="font-bold uppercase tracking-widest text-[10px] text-white/40">Cliques nos Planos</h3>
+             <p className="text-xs text-white/20">Distribuição diária na última semana</p>
+           </div>
+           <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-brand-neon" />
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/40">Hoje</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500" />
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/40">Outros Dias</span>
+              </div>
+           </div>
         </div>
         <ResponsiveContainer width="100%" height="80%">
-          <BarChart data={data}>
+          <BarChart 
+            data={data}
+            onMouseMove={(state) => {
+              if (state.activeTooltipIndex !== undefined) {
+                setHoverIndex(state.activeTooltipIndex);
+              } else {
+                setHoverIndex(null);
+              }
+            }}
+            onMouseLeave={() => setHoverIndex(null)}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
             <XAxis 
               dataKey="day" 
               axisLine={false} 
               tickLine={false} 
-              tick={{ fill: '#666', fontSize: 12 }}
+              tick={{ fill: '#666', fontSize: 10, fontWeight: 700 }}
+              dy={10}
             />
             <YAxis 
               axisLine={false} 
               tickLine={false} 
-              tick={{ fill: '#666', fontSize: 12 }}
+              tick={{ fill: '#666', fontSize: 10, fontWeight: 700 }}
+              dx={-10}
             />
             <Tooltip 
-              cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-              contentStyle={{ background: '#111', border: '1px solid #333', borderRadius: '12px' }}
+              cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+              content={<CustomTooltip />}
             />
-            <Bar dataKey="clicks" radius={[4, 4, 0, 0]}>
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={index === new Date().getDay() ? '#00FF88' : '#007BFF'} />
-              ))}
+            <Legend 
+              verticalAlign="top" 
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ paddingTop: '0px', paddingBottom: '20px' }}
+              formatter={(value) => <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 ml-1">{value}</span>}
+            />
+            <Bar dataKey="clicks" name="Cliques Registrados" radius={[6, 6, 0, 0]}>
+              {data.map((entry, index) => {
+                const isToday = index === new Date().getDay();
+                const isHovered = hoverIndex === index;
+                return (
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={isToday ? '#00FF88' : '#007BFF'} 
+                    fillOpacity={isHovered ? 1 : 0.7}
+                    style={{ transition: 'all 0.3s ease' }}
+                    className="cursor-pointer"
+                  />
+                );
+              })}
             </Bar>
           </BarChart>
         </ResponsiveContainer>

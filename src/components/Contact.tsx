@@ -7,18 +7,29 @@ export default function Contact() {
   const [content, setContent] = useState<any>(null);
 
   useEffect(() => {
+    console.log('Contact component mounted, fetching content...');
     fetch('/api/content')
       .then(res => res.json())
       .then(data => {
+        console.log('Content fetched:', data.contact);
         setContent(data.contact);
         const waUrl = data.contact?.whatsapp_url || 'https://wa.me/5535988019507';
-        import('qrcode').then(QRCode => {
-          QRCode.toDataURL(waUrl, {
-            color: { dark: '#00FF88', light: '#000000' },
-            width: 400,
-            margin: 2
-          }).then(url => setQrCode(url));
-        });
+        console.log('Fetching QR from server for:', waUrl);
+        
+        fetch(`/api/qrcode?text=${encodeURIComponent(waUrl)}`)
+          .then(res => res.json())
+          .then(qrData => {
+            if (qrData.url) {
+              console.log('QR Code fetched from server successfully');
+              setQrCode(qrData.url);
+            }
+          })
+          .catch(err => {
+            console.error('Failed to fetch QR code from server:', err);
+          });
+      })
+      .catch(err => {
+        console.error('Failed to fetch contact content:', err);
       });
   }, []);
 
