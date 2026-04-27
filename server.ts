@@ -262,17 +262,16 @@ if (db.prepare('SELECT COUNT(*) as count FROM services').get().count === 0) {
 async function startServer() {
   const app = express();
   
-  // Log all requests - First thing!
+  // 1. Logging Middleware - MUST BE FIRST
   app.use((req, res, next) => {
-    console.log(`[REQUEST] ${new Date().toISOString()} - ${req.method} ${req.url}`);
+    console.log(`[REQ] ${req.method} ${req.url}`);
     next();
   });
 
-  app.get('/diag-server', (req, res) => {
-    res.send('Server is alive!');
-  });
-
-  app.get('/diag-routes', (req, res) => {
+  // 2. Health & Diag - BEFORE anything else
+  app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+  
+  app.get('/diag/routes', (req, res) => {
     const routes = app._router.stack
       .filter((r: any) => r.route)
       .map((r: any) => ({
@@ -282,83 +281,54 @@ async function startServer() {
     res.json(routes);
   });
 
+  // 3. Body Parsers
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
-  // --- API Routes ---
+  // 4. API Routes
+  const api = express.Router();
 
-  app.get('/api/ping', (req, res) => {
-    console.log('PING hit');
-    res.json({ message: 'pong', time: new Date().toISOString() });
-  });
+  api.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', db: !!db, supabase: !!supabase });
-  });
-
-  app.get('/api/diag', (req, res) => {
-    res.json({
-      node_env: process.env.NODE_ENV,
-      port: PORT,
-      cwd: process.cwd(),
-      time: new Date().toISOString(),
-      supabase_initialized: !!supabase
-    });
-  });
-
-  // Auth: Login Phase 1
-  app.post('/api/auth/login', async (req, res) => {
-    console.log('--- LOGIN ROUTE ATTEMPT ---');
-    console.log('Method:', req.method);
-    console.log('URL:', req.url);
-    console.log('Headers:', JSON.stringify(req.headers));
-    console.log('Body:', JSON.stringify(req.body));
-
+  api.post('/auth/login', async (req, res) => {
+    console.log('API: Login attempt', req.body.username);
     try {
       const { username, password } = req.body;
-      console.log(`Payload received: username=${username}, password=${password ? 'PRESENT' : 'MISSING'}`);
-      
       if (!username || !password) {
         return res.status(400).json({ message: 'Usuário e senha são obrigatórios' });
       }
 
       let user;
       if (supabase) {
-        console.log('Querying Supabase for user...');
         const { data, error } = await supabase.from('users').select('*').eq('username', username).maybeSingle();
-        if (error) {
-          console.error('Supabase query error:', error);
-          return res.status(500).json({ message: error.message });
-        }
+        if (error) throw error;
         user = data;
       } else {
-        console.log('Querying SQLite for user...');
         user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
       }
       
       if (!user) {
-        console.log('User not found in database');
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
-      console.log('User found, comparing passwords...');
       if (!bcrypt.compareSync(password, user.password_hash)) {
-        console.log('Password mismatch');
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
       if (!user.two_factor_enabled) {
         const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1d' });
-        console.log('Login successful (no 2FA)');
         return res.json({ token, requires2FA: false });
       }
 
-      console.log('Login success (requires 2FA)');
       res.json({ requires2FA: true, userId: user.id });
     } catch (error: any) {
-      console.error('CRITICAL LOGIN ERROR:', error);
+      console.error('API Error: /auth/login', error);
       res.status(500).json({ message: `Erro interno: ${error.message}` });
     }
   });
+
+
+
 
   // Auth: Verify 2FA
   app.post('/api/auth/verify-2fa', async (req, res) => {
@@ -835,6 +805,9 @@ async function startServer() {
     }
     res.json({ success: true });
   });
+
+  // Mount API router
+  app.use('/api', api);
 
   // --- API Fallback ---
   app.all('/api/*', (req, res) => {
