@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, ShieldCheck, Lock, User, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { api } from '../lib/api';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -23,28 +24,8 @@ export default function Login() {
     setError('');
 
     try {
-      const url = '/api/auth/login';
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
+      const data = await api.post('/api/auth/login', { username, password }, { showErrorToast: false });
       
-      const contentType = res.headers.get('content-type');
-      let data;
-      
-      if (contentType && contentType.includes('application/json')) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        console.error('Non-JSON response received:', text);
-        // Expose first 50 chars of body to help debug
-        const bodySnippet = text.substring(0, 50).replace(/[<>]/g, '');
-        throw new Error(`Erro no servidor: ${res.status} ao chamar ${url}. Corpo: ${bodySnippet}...`);
-      }
-
-      if (!res.ok) throw new Error(data.message || 'Erro desconhecido');
-
       if (data.requires2FA) {
         setRequires2FA(true);
         setUserId(data.userId);
@@ -65,15 +46,7 @@ export default function Login() {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail })
-      });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.message);
-
+      await api.post('/api/auth/forgot-password', { email: forgotEmail });
       setForgotSent(true);
     } catch (err: any) {
       setError(err.message);
@@ -88,14 +61,7 @@ export default function Login() {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/verify-2fa', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, code })
-      });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.message);
+      const data = await api.post('/api/verify-2fa', { userId, code }, { showErrorToast: false });
 
       localStorage.setItem('token', data.token);
       navigate('/admin/dashboard');

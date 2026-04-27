@@ -1,13 +1,13 @@
 import { motion } from 'motion/react';
 import { ArrowRight, Wifi, Zap, Activity, Globe } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
 
 export default function Hero() {
   const [content, setContent] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/content')
-      .then(res => res.json())
+    api.get('/api/content')
       .then(data => setContent(data.hero));
   }, []);
 

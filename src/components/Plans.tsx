@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Check, ArrowUpRight, Zap } from 'lucide-react';
+import { api } from '../lib/api';
 
 interface Plan {
   id: number;
@@ -22,8 +23,7 @@ export default function Plans() {
   const [plans, setPlans] = useState<Plan[]>([]);
 
   useEffect(() => {
-    fetch(`/api/plans?t=${Date.now()}`)
-      .then(res => res.json())
+    api.get(`/api/plans?t=${Date.now()}`)
       .then(data => setPlans(data));
   }, []);
 
@@ -112,7 +112,7 @@ export default function Plans() {
                     <a 
                       href={plan.cta_url || "#contato"}
                       onClick={() => {
-                        fetch(`/api/plans/${plan.id}/click`, { method: 'POST' });
+                        api.post(`/api/plans/${plan.id}/click`, {}, { showErrorToast: false });
                       }}
                       className={`block w-full py-5 text-center font-black text-[11px] uppercase tracking-widest transition-all rounded-2xl border ${isFeatured ? 'text-brand-black border-transparent shadow-xl hover:-translate-y-1' : 'bg-white/5 text-white border-white/10 hover:bg-white/10 hover:border-white/20'}`}
                       style={isFeatured ? { 

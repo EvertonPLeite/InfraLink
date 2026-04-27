@@ -3,6 +3,7 @@ import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Tra
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, PieChart, Pie } from 'recharts';
+import { api } from '../lib/api';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -162,10 +163,7 @@ function ManageCustomers() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchCustomers = () => {
-    fetch('/api/admin/customers', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => res.json())
+    api.get('/api/admin/customers')
       .then(data => {
         setCustomers(data);
         setLoading(false);
@@ -173,8 +171,7 @@ function ManageCustomers() {
   };
 
   const fetchPlans = () => {
-    fetch('/api/plans')
-      .then(res => res.json())
+    api.get('/api/plans')
       .then(data => setPlans(data));
   };
 
@@ -185,31 +182,13 @@ function ManageCustomers() {
 
   const handleDelete = async (id: number) => {
     console.log('Frontend: Executando exclusão do cliente ID:', id);
-    const token = localStorage.getItem('token');
-    
-    if (!token) {
-      alert('Sessão expirada. Por favor, faça login novamente.');
-      return;
-    }
     
     try {
-      const res = await fetch(`/api/admin/customers/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      console.log('Frontend: Resposta do servidor (status):', res.status);
-      if (res.ok) {
-        setDeletingId(null);
-        fetchCustomers();
-      } else {
-        const errorData = await res.json();
-        console.error('Frontend: Erro retornado pelo servidor:', errorData);
-        alert(`Erro ao excluir cliente: ${errorData.message || 'Erro desconhecido'}`);
-      }
+      await api.delete(`/api/admin/customers/${id}`);
+      setDeletingId(null);
+      fetchCustomers();
     } catch (error) {
-      console.error('Frontend: Erro de rede ou outro erro:', error);
-      alert('Erro ao excluir cliente. Verifique sua conexão.');
+      console.error('Frontend: Erro ao excluir cliente:', error);
     }
   };
 
@@ -222,20 +201,17 @@ function ManageCustomers() {
     data.budget = data.budget.toString().replace(',', '.');
     data.cost = data.cost.toString().replace(',', '.');
 
-    const method = editingCustomer?.id ? 'PUT' : 'POST';
-    const url = editingCustomer?.id ? `/api/admin/customers/${editingCustomer.id}` : '/api/admin/customers';
+    const request = editingCustomer?.id 
+      ? api.put(`/api/admin/customers/${editingCustomer.id}`, data)
+      : api.post('/api/admin/customers', data);
 
-    await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(data)
-    });
-
-    setEditingCustomer(null);
-    fetchCustomers();
+    try {
+      await request;
+      setEditingCustomer(null);
+      fetchCustomers();
+    } catch (error) {
+      console.error('Error saving customer:', error);
+    }
   };
 
   // Helper to format date without UTC shift
@@ -465,10 +441,7 @@ function Analytics() {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch('/api/admin/stats/plan-clicks', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => res.json())
+    api.get('/api/admin/stats/plan-clicks')
       .then(stats => {
         setData(stats);
         setLoading(false);
@@ -575,8 +548,7 @@ function EditContent() {
   const [successSection, setSuccessSection] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/content')
-      .then(res => res.json())
+    api.get('/api/content')
       .then(data => {
         setContent(data);
         setLoading(false);
@@ -604,19 +576,9 @@ function EditContent() {
     }));
 
     try {
-      const res = await fetch('/api/admin/content/batch', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ updates })
-      });
-      
-      if (res.ok) {
-        setSuccessSection(section);
-        setTimeout(() => setSuccessSection(null), 3000);
-      }
+      await api.post('/api/admin/content/batch', { updates });
+      setSuccessSection(section);
+      setTimeout(() => setSuccessSection(null), 3000);
     } catch (error) {
       console.error('Error saving section:', error);
     } finally {
@@ -843,8 +805,7 @@ function ManagePlans() {
 
   const fetchPlans = () => {
     setLoading(true);
-    fetch(`/api/plans?t=${Date.now()}`)
-      .then(res => res.json())
+    api.get(`/api/plans?t=${Date.now()}`)
       .then(data => {
         setPlans(data);
         setLoading(false);
@@ -854,20 +815,10 @@ function ManagePlans() {
   useEffect(fetchPlans, []);
 
   const handleDelete = async (id: number) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`/api/admin/plans/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setDeletingId(null);
-        fetchPlans();
-      } else {
-        alert('Erro ao excluir plano.');
-      }
+      await api.delete(`/api/admin/plans/${id}`);
+      setDeletingId(null);
+      fetchPlans();
     } catch (error) {
       console.error('Delete plan error:', error);
     }
@@ -888,29 +839,15 @@ function ManagePlans() {
     // Map highlight_color_text back to highlight_color if it was used
     if (data.highlight_color_text) data.highlight_color = data.highlight_color_text;
 
-    const method = editingPlan?.id ? 'PUT' : 'POST';
+    const method = editingPlan?.id ? 'put' : 'post';
     const url = editingPlan?.id ? `/api/admin/plans/${editingPlan.id}` : '/api/admin/plans';
 
     try {
-      const res = await fetch(url, {
-        method,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(data)
-      });
-
-      if (res.ok) {
-        setEditingPlan(null);
-        fetchPlans();
-      } else {
-        const errorData = await res.json();
-        alert(`Erro ao salvar plano: ${errorData.message || 'Verifique os dados'}`);
-      }
+      await (api as any)[method](url, data);
+      setEditingPlan(null);
+      fetchPlans();
     } catch (error) {
       console.error('Save plan error:', error);
-      alert('Erro de rede ao salvar plano.');
     } finally {
       setSaving(false);
     }
@@ -1127,14 +1064,14 @@ function SecuritySettings() {
   const [isConfirmingDisable, setIsConfirmingDisable] = useState(false);
 
   const fetchUser = async () => {
-    const res = await fetch('/api/auth/me', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
+    try {
+      const data = await api.get('/api/auth/me');
       setUser(data);
+    } catch (error) {
+      console.error('Error fetching user:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -1142,38 +1079,31 @@ function SecuritySettings() {
   }, []);
 
   const handleSetup = async () => {
-    const res = await fetch('/api/auth/setup-2fa', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    const data = await res.json();
-    setSetupData(data);
+    try {
+      const data = await api.get('/api/auth/setup-2fa');
+      setSetupData(data);
+    } catch (error) {
+      console.error('Error setting up 2FA:', error);
+    }
   };
 
   const handleEnable = async () => {
-    const res = await fetch('/api/auth/enable-2fa', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify({ code })
-    });
-    if (res.ok) {
+    try {
+      await api.post('/api/auth/enable-2fa', { code });
       setSetupData(null);
       fetchUser();
-    } else {
+    } catch (error) {
       setError('Código inválido');
     }
   };
 
   const handleDisable = async () => {
-    const res = await fetch('/api/auth/disable-2fa', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
+    try {
+      await api.post('/api/auth/disable-2fa');
       setIsConfirmingDisable(false);
       fetchUser();
+    } catch (error) {
+      console.error('Error disabling 2FA:', error);
     }
   };
 
@@ -1293,15 +1223,16 @@ function ManageServices() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchServices = () => {
-    fetch('/api/services')
-      .then(res => res.json())
+    api.get('/api/services')
       .then(data => {
         setServices(data);
         setLoading(false);
       });
   };
 
-  useEffect(fetchServices, []);
+  useEffect(() => {
+    fetchServices();
+  }, []);
 
   useEffect(() => {
     if (editingService) {
@@ -1310,18 +1241,10 @@ function ManageServices() {
   }, [editingService]);
 
   const handleDelete = async (id: number) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`/api/admin/services/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setDeletingId(null);
-        fetchServices();
-      }
+      await api.delete(`/api/admin/services/${id}`);
+      setDeletingId(null);
+      fetchServices();
     } catch (error) {
       console.error('Delete service error:', error);
     }
@@ -1334,20 +1257,16 @@ function ManageServices() {
     
     const payload = { ...data, icon: selectedIcon };
     
-    const method = editingService?.id ? 'PUT' : 'POST';
+    const method = editingService?.id ? 'put' : 'post';
     const url = editingService?.id ? `/api/admin/services/${editingService.id}` : '/api/admin/services';
 
-    await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    setEditingService(null);
-    fetchServices();
+    try {
+      await (api as any)[method](url, payload);
+      setEditingService(null);
+      fetchServices();
+    } catch (error) {
+       console.error('Error saving service:', error);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
@@ -1484,10 +1403,7 @@ function ManageInventory() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchItems = () => {
-    fetch('/api/admin/inventory', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => res.json())
+    api.get('/api/admin/inventory')
       .then(data => {
         setItems(data);
         setLoading(false);
@@ -1497,18 +1413,10 @@ function ManageInventory() {
   useEffect(fetchItems, []);
 
   const handleDelete = async (id: number) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`/api/admin/inventory/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setDeletingId(null);
-        fetchItems();
-      }
+      await api.delete(`/api/admin/inventory/${id}`);
+      setDeletingId(null);
+      fetchItems();
     } catch (error) {
       console.error('Delete inventory error:', error);
     }
@@ -1521,20 +1429,16 @@ function ManageInventory() {
     
     data.price = data.price.toString().replace(',', '.');
 
-    const method = editingItem?.id ? 'PUT' : 'POST';
+    const method = editingItem?.id ? 'put' : 'post';
     const url = editingItem?.id ? `/api/admin/inventory/${editingItem.id}` : '/api/admin/inventory';
 
-    await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(data)
-    });
-
-    setEditingItem(null);
-    fetchItems();
+    try {
+      await (api as any)[method](url, data);
+      setEditingItem(null);
+      fetchItems();
+    } catch (error) {
+      console.error('Error saving inventory item:', error);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
@@ -1681,15 +1585,11 @@ function DashboardHome() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const headers = { 'Authorization': `Bearer ${localStorage.getItem('token')}` };
       try {
-        const [cusRes, invRes] = await Promise.all([
-          fetch('/api/admin/customers', { headers }),
-          fetch('/api/admin/inventory', { headers })
+        const [cusData, invData] = await Promise.all([
+          api.get('/api/admin/customers'),
+          api.get('/api/admin/inventory')
         ]);
-        
-        const cusData = await cusRes.json();
-        const invData = await invRes.json();
         
         setCustomers(Array.isArray(cusData) ? cusData : []);
         setInventory(Array.isArray(invData) ? invData : []);
