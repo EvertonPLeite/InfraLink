@@ -367,11 +367,6 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
   };
 
 async function startServer() {
-  // Run seeding
-  await seedUsers();
-  await seedPlans();
-  await seedServices();
-
   const app = express();
   
   // 1. Logging Middleware - MUST BE FIRST
@@ -381,6 +376,15 @@ async function startServer() {
   });
 
   // 2. Health & Diag - BEFORE anything else
+  app.get('/debug', (req, res) => {
+    res.json({
+      status: 'ok',
+      env: process.env.NODE_ENV,
+      cwd: process.cwd(),
+      time: new Date().toISOString()
+    });
+  });
+
   app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
   
   app.get('/diag/routes', (req, res) => {
@@ -402,9 +406,18 @@ async function startServer() {
 
   // Add a dedicated logger for API requests
   api.use((req, res, next) => {
-    console.log(`[API] ${req.method} ${req.url}`);
+    console.log(`[API-REQ] ${req.method} ${req.url}`);
     next();
   });
+
+  // Diagnostic route
+  app.get('/api-ping', (req, res) => {
+    console.log('API-PING HIT');
+    res.json({ status: 'ok', time: new Date().toISOString() });
+  });
+
+  console.log('Configuring API routes...');
+  app.use('/api', api);
 
   api.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
@@ -990,9 +1003,6 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Mount API router
-  app.use('/api', api);
-
   // --- API Fallback ---
   app.all('/api/*', (req, res) => {
     console.log(`404 API Not Found: ${req.method} ${req.url}`);
@@ -1016,10 +1026,24 @@ async function startServer() {
 
   console.log('Registering routes...');
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log('Routes registered and server is listening.');
+    
+    // Run seeding AFTER server is listening to ensure startup is not blocked
+    try {
+      console.log('Starting seed process...');
+      await seedUsers();
+      await seedPlans();
+      await seedServices();
+      console.log('Seed process completed.');
+    } catch (err) {
+      console.error('Seeding failed during startup:', err);
+    }
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('FATAL: Failed to start server:', err);
+  process.exit(1);
+});
