@@ -37,7 +37,7 @@ export default function Services() {
   const [services, setServices] = useState<any[]>([]);
 
   useEffect(() => {
-    safeFetch('/api/services')
+    safeFetch(`/api/services?t=${Date.now()}`)
       .then(data => {
         if (Array.isArray(data)) {
           setServices(data);

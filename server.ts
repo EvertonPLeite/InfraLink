@@ -281,17 +281,38 @@ try {
     db.prepare('ALTER TABLE services ADD COLUMN icon TEXT').run();
   }
   
-  // Cleanup duplicates in SQLite if they exist before adding UNIQUE index (if we were already at this step)
-  const duplicates = db.prepare('SELECT title, COUNT(*) as count FROM services GROUP BY title HAVING count > 1').all() as any[];
-  if (duplicates.length > 0) {
-    console.log('Cleaning up duplicate services in SQLite...');
-    duplicates.forEach(dup => {
+  // Cleanup duplicates in SQLite if they exist before adding UNIQUE index
+  const duplicateServices = db.prepare('SELECT title, COUNT(*) as count FROM services GROUP BY title HAVING count > 1').all() as any[];
+  if (duplicateServices.length > 0) {
+    console.log(`Cleaning up ${duplicateServices.length} duplicate service titles in SQLite...`);
+    duplicateServices.forEach(dup => {
       const firstId = db.prepare('SELECT id FROM services WHERE title = ? ORDER BY id ASC LIMIT 1').get(dup.title) as any;
       db.prepare('DELETE FROM services WHERE title = ? AND id != ?').run(dup.title, firstId.id);
     });
   }
+  
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_services_title ON services(title)`);
+  } catch (err) {
+    console.warn("Could not create unique index on services(title), might already be unique or have duplicates:", err);
+  }
+
+  const duplicatePlans = db.prepare('SELECT name, COUNT(*) as count FROM plans GROUP BY name HAVING count > 1').all() as any[];
+  if (duplicatePlans.length > 0) {
+    console.log(`Cleaning up ${duplicatePlans.length} duplicate plan names in SQLite...`);
+    duplicatePlans.forEach(dup => {
+      const firstId = db.prepare('SELECT id FROM plans WHERE name = ? ORDER BY id ASC LIMIT 1').get(dup.name) as any;
+      db.prepare('DELETE FROM plans WHERE name = ? AND id != ?').run(dup.name, firstId.id);
+    });
+  }
+
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name ON plans(name)`);
+  } catch (err) {
+    console.warn("Could not create unique index on plans(name), might already be unique or have duplicates:", err);
+  }
 } catch (e) {
-  console.error("Services migration error:", e);
+  console.error("Database migration error:", e);
 }
 
   // Check if cost column exists in customers table, if not add it (Migration)
@@ -795,10 +816,12 @@ async function startServer() {
   api.get('/content', async (req, res) => {
     try {
       let content;
+      let source = 'SQLite';
       if (supabase) {
         const { data, error } = await supabase.from('page_content').select('*');
         if (!error && data) {
           content = data;
+          source = 'Supabase';
         } else if (error) {
           console.warn('Supabase content fetch failed, falling back to SQLite:', error.message);
         }
@@ -808,6 +831,7 @@ async function startServer() {
         content = db.prepare('SELECT * FROM page_content').all();
       }
       
+      console.log(`[API] Returning content from ${source}`);
       const formatted: any = {};
       if (content && Array.isArray(content)) {
         content.forEach((item: any) => {
@@ -853,14 +877,15 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Plans API (Moved to API router)
   api.get('/plans', async (req, res) => {
     try {
       let plans;
+      let source = 'SQLite';
       if (supabase) {
         const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
         if (!error && data && data.length > 0) {
           plans = data;
+          source = 'Supabase';
         } else if (error) {
           console.warn('Supabase plans fetch failed, falling back to SQLite:', error.message);
         }
@@ -870,6 +895,7 @@ async function startServer() {
         plans = db.prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
       }
       
+      console.log(`[API] Returning ${plans.length} plans from ${source}`);
       res.json(plans || []);
     } catch (err: any) {
       console.error('Error fetching plans:', err);
@@ -931,14 +957,15 @@ async function startServer() {
     res.json(formattedStats);
   });
 
-  // Services API (Moved to API router)
   api.get('/services', async (req, res) => {
     try {
       let services;
+      let source = 'SQLite';
       if (supabase) {
         const { data, error } = await supabase.from('services').select('*').order('order_index', { ascending: true });
         if (!error && data && data.length > 0) {
           services = data;
+          source = 'Supabase';
         } else if (error) {
           console.warn('Supabase services fetch failed, falling back to SQLite:', error.message);
         }
@@ -948,6 +975,7 @@ async function startServer() {
         services = db.prepare('SELECT * FROM services ORDER BY order_index ASC').all();
       }
       
+      console.log(`[API] Returning ${services.length} services from ${source}`);
       res.json(services || []);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
