@@ -20,6 +20,7 @@ const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'infralink-super-secret-key';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // SMTP Config
 const smtpConfig = {
@@ -74,8 +75,10 @@ const isValidSupabaseConfig = (url: string | undefined, key: string | undefined)
 
 if (isValidSupabaseConfig(SUPABASE_URL, SUPABASE_KEY)) {
   try {
-    supabase = createClient(SUPABASE_URL!, SUPABASE_KEY!);
-    console.log('Supabase client initialized successfully');
+    // Use service role key if available to bypass RLS on server-side
+    const keyToUse = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_KEY;
+    supabase = createClient(SUPABASE_URL!, keyToUse!);
+    console.log(`Supabase client initialized successfully using ${SUPABASE_SERVICE_ROLE_KEY ? 'service_role' : 'anon'} key`);
   } catch (err) {
     console.error('Failed to initialize Supabase client:', err);
     supabase = null;
@@ -888,8 +891,12 @@ async function startServer() {
   // Customers API (Moved to API router)
   api.get('/admin/customers', authenticate, async (req, res) => {
     if (supabase) {
+      console.log('[CUSTOMER] Fetching customers from Supabase');
       const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-      if (error) return res.status(500).json({ message: error.message });
+      if (error) {
+        console.error('[CUSTOMER] Supabase fetch error:', error.message);
+        return res.status(500).json({ message: error.message });
+      }
       res.json(data);
     } else {
       const customers = db.prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
@@ -899,9 +906,13 @@ async function startServer() {
 
   api.post('/admin/customers', authenticate, async (req, res) => {
     const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    console.log(`[CUSTOMER] Creating new customer: ${name} (${email})`);
     if (supabase) {
       const { error } = await supabase.from('customers').insert({ name, location, event_date, budget, cost: cost || 0, status: status || 'Pendente', start_date, end_date, phone, email, plan_id });
-      if (error) return res.status(500).json({ message: error.message });
+      if (error) {
+        console.error('[CUSTOMER] Supabase insert error:', error.message, error.details, error.hint);
+        return res.status(500).json({ message: error.message });
+      }
     } else {
       db.prepare('INSERT INTO customers (name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, location, event_date, budget, cost || 0, status || 'Pendente', start_date, end_date, phone, email, plan_id);
     }

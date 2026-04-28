@@ -122,3 +122,22 @@ INSERT INTO services (title, description, icon, order_index) VALUES
 ('Estabilidade para Pagamentos', 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', 'Zap', 2),
 ('Banco de Baterias', 'Nobreaks de alta performance inclusos para garantir energia constante.', 'Battery', 3),
 ('Suporte Presencial', 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', 'Headset', 4);
+
+-- Enable RLS on all tables
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE page_content ENABLE ROW LEVEL SECURITY;
+ALTER TABLE services ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plan_clicks ENABLE ROW LEVEL SECURITY;
+
+-- Create policies (Allowing all for simplicity in this admin context)
+CREATE POLICY "Allow all operations for users" ON users FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations for inventory" ON inventory FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations for page_content" ON page_content FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations for services" ON services FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations for plans" ON plans FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations for customers" ON customers FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations for plan_clicks" ON plan_clicks FOR ALL USING (true) WITH CHECK (true);
+
