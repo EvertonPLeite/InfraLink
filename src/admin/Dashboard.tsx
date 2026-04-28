@@ -3,6 +3,7 @@ import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Tra
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, PieChart, Pie } from 'recharts';
+import { safeFetch } from '../lib/fetch';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -162,20 +163,23 @@ function ManageCustomers() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchCustomers = () => {
-    fetch('/api/admin/customers', {
+    safeFetch('/api/admin/customers', {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
-      .then(res => res.json())
       .then(data => {
         setCustomers(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error fetching customers:', err);
         setLoading(false);
       });
   };
 
   const fetchPlans = () => {
-    fetch('/api/plans')
-      .then(res => res.json())
-      .then(data => setPlans(data));
+    safeFetch('/api/plans')
+      .then(data => setPlans(data))
+      .catch(err => console.error('Error fetching plans:', err));
   };
 
   useEffect(() => {
@@ -193,23 +197,17 @@ function ManageCustomers() {
     }
     
     try {
-      const res = await fetch(`/api/admin/customers/${id}`, {
+      await safeFetch(`/api/admin/customers/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      console.log('Frontend: Resposta do servidor (status):', res.status);
-      if (res.ok) {
-        setDeletingId(null);
-        fetchCustomers();
-      } else {
-        const errorData = await res.json();
-        console.error('Frontend: Erro retornado pelo servidor:', errorData);
-        alert(`Erro ao excluir cliente: ${errorData.message || 'Erro desconhecido'}`);
-      }
-    } catch (error) {
-      console.error('Frontend: Erro de rede ou outro erro:', error);
-      alert('Erro ao excluir cliente. Verifique sua conexão.');
+      console.log('Frontend: Exclusão bem-sucedida');
+      setDeletingId(null);
+      fetchCustomers();
+    } catch (error: any) {
+      console.error('Frontend: Erro ao excluir cliente:', error);
+      alert(`Erro ao excluir cliente: ${error.message || 'Erro desconhecido'}`);
     }
   };
 
@@ -225,17 +223,22 @@ function ManageCustomers() {
     const method = editingCustomer?.id ? 'PUT' : 'POST';
     const url = editingCustomer?.id ? `/api/admin/customers/${editingCustomer.id}` : '/api/admin/customers';
 
-    await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(data)
-    });
+    try {
+      await safeFetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(data)
+      });
 
-    setEditingCustomer(null);
-    fetchCustomers();
+      setEditingCustomer(null);
+      fetchCustomers();
+    } catch (err: any) {
+      console.error('Error saving customer:', err);
+      alert(`Erro ao salvar cliente: ${err.message}`);
+    }
   };
 
   // Helper to format date without UTC shift
@@ -465,12 +468,15 @@ function Analytics() {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch('/api/admin/stats/plan-clicks', {
+    safeFetch('/api/admin/stats/plan-clicks', {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
-      .then(res => res.json())
       .then(stats => {
         setData(stats);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Analytics error:', err);
         setLoading(false);
       });
   }, []);
@@ -575,10 +581,13 @@ function EditContent() {
   const [successSection, setSuccessSection] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/content')
-      .then(res => res.json())
+    safeFetch('/api/content')
       .then(data => {
         setContent(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error fetching content:', err);
         setLoading(false);
       });
   }, []);
@@ -604,7 +613,7 @@ function EditContent() {
     }));
 
     try {
-      const res = await fetch('/api/admin/content/batch', {
+      await safeFetch('/api/admin/content/batch', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -613,12 +622,11 @@ function EditContent() {
         body: JSON.stringify({ updates })
       });
       
-      if (res.ok) {
-        setSuccessSection(section);
-        setTimeout(() => setSuccessSection(null), 3000);
-      }
-    } catch (error) {
+      setSuccessSection(section);
+      setTimeout(() => setSuccessSection(null), 3000);
+    } catch (error: any) {
       console.error('Error saving section:', error);
+      alert(`Erro ao salvar seção: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -843,10 +851,13 @@ function ManagePlans() {
 
   const fetchPlans = () => {
     setLoading(true);
-    fetch(`/api/plans?t=${Date.now()}`)
-      .then(res => res.json())
+    safeFetch(`/api/plans?t=${Date.now()}`)
       .then(data => {
         setPlans(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error loading plans:', err);
         setLoading(false);
       });
   };
@@ -858,18 +869,15 @@ function ManagePlans() {
     if (!token) return;
 
     try {
-      const res = await fetch(`/api/admin/plans/${id}`, {
+      await safeFetch(`/api/admin/plans/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        setDeletingId(null);
-        fetchPlans();
-      } else {
-        alert('Erro ao excluir plano.');
-      }
-    } catch (error) {
+      setDeletingId(null);
+      fetchPlans();
+    } catch (error: any) {
       console.error('Delete plan error:', error);
+      alert(`Erro ao excluir plano: ${error.message}`);
     }
   };
 
@@ -892,7 +900,7 @@ function ManagePlans() {
     const url = editingPlan?.id ? `/api/admin/plans/${editingPlan.id}` : '/api/admin/plans';
 
     try {
-      const res = await fetch(url, {
+      await safeFetch(url, {
         method,
         headers: { 
           'Content-Type': 'application/json',
@@ -901,16 +909,11 @@ function ManagePlans() {
         body: JSON.stringify(data)
       });
 
-      if (res.ok) {
-        setEditingPlan(null);
-        fetchPlans();
-      } else {
-        const errorData = await res.json();
-        alert(`Erro ao salvar plano: ${errorData.message || 'Verifique os dados'}`);
-      }
-    } catch (error) {
+      setEditingPlan(null);
+      fetchPlans();
+    } catch (error: any) {
       console.error('Save plan error:', error);
-      alert('Erro de rede ao salvar plano.');
+      alert(`Erro ao salvar plano: ${error.message || 'Verifique os dados'}`);
     } finally {
       setSaving(false);
     }
@@ -1127,12 +1130,13 @@ function SecuritySettings() {
   const [isConfirmingDisable, setIsConfirmingDisable] = useState(false);
 
   const fetchUser = async () => {
-    const res = await fetch('/api/auth/me', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
+    try {
+      const data = await safeFetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
       setUser(data);
+    } catch (err) {
+      console.error('Error fetching user:', err);
     }
     setLoading(false);
   };
@@ -1142,38 +1146,45 @@ function SecuritySettings() {
   }, []);
 
   const handleSetup = async () => {
-    const res = await fetch('/api/auth/setup-2fa', {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    const data = await res.json();
-    setSetupData(data);
+    try {
+      const data = await safeFetch('/api/auth/setup-2fa', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      setSetupData(data);
+    } catch (err: any) {
+      console.error('2FA setup error:', err);
+      alert(`Erro ao configurar 2FA: ${err.message}`);
+    }
   };
 
   const handleEnable = async () => {
-    const res = await fetch('/api/auth/enable-2fa', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify({ code })
-    });
-    if (res.ok) {
+    try {
+      await safeFetch('/api/auth/enable-2fa', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ code })
+      });
       setSetupData(null);
       fetchUser();
-    } else {
-      setError('Código inválido');
+    } catch (err: any) {
+      setError(err.message || 'Código inválido');
     }
   };
 
   const handleDisable = async () => {
-    const res = await fetch('/api/auth/disable-2fa', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
+    try {
+      await safeFetch('/api/auth/disable-2fa', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
       setIsConfirmingDisable(false);
       fetchUser();
+    } catch (err: any) {
+      console.error('2FA disable error:', err);
+      alert(`Erro ao desativar 2FA: ${err.message}`);
     }
   };
 
@@ -1293,10 +1304,13 @@ function ManageServices() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchServices = () => {
-    fetch('/api/services')
-      .then(res => res.json())
+    safeFetch('/api/services')
       .then(data => {
         setServices(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error fetching services:', err);
         setLoading(false);
       });
   };
@@ -1314,16 +1328,15 @@ function ManageServices() {
     if (!token) return;
 
     try {
-      const res = await fetch(`/api/admin/services/${id}`, {
+      await safeFetch(`/api/admin/services/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        setDeletingId(null);
-        fetchServices();
-      }
-    } catch (error) {
+      setDeletingId(null);
+      fetchServices();
+    } catch (error: any) {
       console.error('Delete service error:', error);
+      alert(`Erro ao excluir serviço: ${error.message}`);
     }
   };
 
@@ -1337,17 +1350,22 @@ function ManageServices() {
     const method = editingService?.id ? 'PUT' : 'POST';
     const url = editingService?.id ? `/api/admin/services/${editingService.id}` : '/api/admin/services';
 
-    await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(payload)
-    });
+    try {
+      await safeFetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(payload)
+      });
 
-    setEditingService(null);
-    fetchServices();
+      setEditingService(null);
+      fetchServices();
+    } catch (err: any) {
+      console.error('Save service error:', err);
+      alert(`Erro ao salvar serviço: ${err.message}`);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
@@ -1484,12 +1502,15 @@ function ManageInventory() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchItems = () => {
-    fetch('/api/admin/inventory', {
+    safeFetch('/api/admin/inventory', {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
-      .then(res => res.json())
       .then(data => {
         setItems(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error fetching inventory:', err);
         setLoading(false);
       });
   };
@@ -1501,16 +1522,15 @@ function ManageInventory() {
     if (!token) return;
 
     try {
-      const res = await fetch(`/api/admin/inventory/${id}`, {
+      await safeFetch(`/api/admin/inventory/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        setDeletingId(null);
-        fetchItems();
-      }
-    } catch (error) {
+      setDeletingId(null);
+      fetchItems();
+    } catch (error: any) {
       console.error('Delete inventory error:', error);
+      alert(`Erro ao excluir item: ${error.message}`);
     }
   };
 
@@ -1524,17 +1544,22 @@ function ManageInventory() {
     const method = editingItem?.id ? 'PUT' : 'POST';
     const url = editingItem?.id ? `/api/admin/inventory/${editingItem.id}` : '/api/admin/inventory';
 
-    await fetch(url, {
-      method,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(data)
-    });
+    try {
+      await safeFetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(data)
+      });
 
-    setEditingItem(null);
-    fetchItems();
+      setEditingItem(null);
+      fetchItems();
+    } catch (err: any) {
+      console.error('Save item error:', err);
+      alert(`Erro ao salvar item: ${err.message}`);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
@@ -1683,13 +1708,10 @@ function DashboardHome() {
     const fetchData = async () => {
       const headers = { 'Authorization': `Bearer ${localStorage.getItem('token')}` };
       try {
-        const [cusRes, invRes] = await Promise.all([
-          fetch('/api/admin/customers', { headers }),
-          fetch('/api/admin/inventory', { headers })
+        const [cusData, invData] = await Promise.all([
+          safeFetch('/api/admin/customers', { headers }),
+          safeFetch('/api/admin/inventory', { headers })
         ]);
-        
-        const cusData = await cusRes.json();
-        const invData = await invRes.json();
         
         setCustomers(Array.isArray(cusData) ? cusData : []);
         setInventory(Array.isArray(invData) ? invData : []);

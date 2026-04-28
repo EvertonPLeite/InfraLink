@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { Wifi, ShieldCheck, Database, Headset, Battery, Satellite, Link, HelpCircle, HardDrive, Cpu, Globe, Zap, Camera, Video, Share2, Radio, Link as LinkIcon, Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { safeFetch } from '../lib/fetch';
 
 const iconMap: any = {
   'Wifi': Wifi,
@@ -36,9 +37,19 @@ export default function Services() {
   const [services, setServices] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch('/api/services')
-      .then(res => res.json())
-      .then(data => setServices(data));
+    safeFetch('/api/services')
+      .then(data => {
+        if (Array.isArray(data)) {
+          setServices(data);
+        } else {
+          console.error('Data received for services is not an array:', data);
+          setServices([]);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch services:', err);
+        setServices([]);
+      });
   }, []);
 
   return (

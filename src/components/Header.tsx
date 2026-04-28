@@ -3,6 +3,7 @@ import { Menu, X, Lock, Instagram } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { Logo } from './Logo';
+import { safeFetch } from '../lib/fetch';
 
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -10,9 +11,9 @@ export default function Header() {
   const [content, setContent] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/content')
-      .then(res => res.json())
-      .then(data => setContent(data.general));
+    safeFetch('/api/content')
+      .then(data => setContent(data.general))
+      .catch(err => console.error('Failed to fetch header content:', err));
 
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
     window.addEventListener('scroll', handleScroll);

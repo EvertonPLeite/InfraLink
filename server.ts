@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
 import QRCode from 'qrcode';
+import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +20,44 @@ const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'infralink-super-secret-key';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+// SMTP Config
+const smtpConfig = {
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_PORT === '465',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+};
+
+const transporter = nodemailer.createTransport(smtpConfig);
+
+// Helper to send email
+async function sendEmail({ to, subject, html }: { to: string, subject: string, html: string }) {
+  if (!smtpConfig.host || !smtpConfig.auth.user) {
+    console.log('--- EMAIL SIMULATION (SMTP NOT CONFIGURED) ---');
+    console.log(`To: ${to}`);
+    console.log(`Subject: ${subject}`);
+    console.log(`Body: ${html}`);
+    console.log('----------------------------------------------');
+    return;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || '"InfraLink Eventos" <noreply@infralink.com.br>',
+      to,
+      subject,
+      html,
+    });
+    console.log(`Email sent to ${to}`);
+  } catch (err) {
+    console.error('Failed to send email:', err);
+    throw err;
+  }
+}
 
 // Supabase Setup
 let supabase: any = null;
@@ -209,14 +248,30 @@ try {
   }
 
 // Seed Initial Data
-const seedUsers = ['admin', 'infralinkeventos@gmail.com'];
-seedUsers.forEach(username => {
-  const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-  if (!existingUser) {
-    const hash = bcrypt.hashSync('admin123', 10);
-    db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username, hash);
+const seedUsers = async () => {
+  const users = ['admin', 'infralinkeventos@gmail.com'];
+  const password = 'admin123';
+  const hash = bcrypt.hashSync(password, 10);
+
+  for (const username of users) {
+    // SQLite
+    const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    if (!existingUser) {
+      console.log(`Seeding user ${username} into SQLite...`);
+      db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username, hash);
+    }
+
+    // Supabase
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('id').eq('username', username).maybeSingle();
+      if (!error && !data) {
+        console.log(`Seeding user ${username} into Supabase...`);
+        const { error: insertError } = await supabase.from('users').insert({ username, password_hash: hash });
+        if (insertError) console.error(`Error seeding user ${username} to Supabase:`, insertError.message, insertError.code, insertError.hint);
+      }
+    }
   }
-});
+};
 
 const seedContent = [
   ['hero', 'title', 'Seu <span class="text-white/40">evento</span> não pode <span class="gradient-text">parar.</span>'],
@@ -243,23 +298,77 @@ const seedContent = [
 const insertContent = db.prepare('INSERT OR IGNORE INTO page_content (section, key, value) VALUES (?, ?, ?)');
 seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
 
-if (db.prepare('SELECT COUNT(*) as count FROM plans').get().count === 0) {
-  const insertPlan = db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  insertPlan.run('Starter', 'Ideal para eventos pequenos com até 200 pessoas', 'R$ 890', 'por evento', 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', '', '#0066FF', 0, 'Contratar plano', '#', 0);
-  insertPlan.run('Professional', 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', 'R$ 1.990', 'por evento', 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', '★ Mais Popular', '#00FF88', 1, 'Contratar plano', '#', 1);
-  insertPlan.run('Enterprise', 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', 'Sob consulta', 'personalizado', 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', 'Premium', '#0066FF', 0, 'Solicitar proposta', '#', 2);
-}
+  // Seed Initial Data
+  const seedPlans = async () => {
+    try {
+      const sqliteCount: any = db.prepare('SELECT COUNT(*) as count FROM plans').get();
+      if (sqliteCount.count === 0) {
+        console.log('Seeding plans into SQLite...');
+        const insertPlan = db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        insertPlan.run('Starter', 'Ideal para eventos pequenos com até 200 pessoas', 'R$ 890', 'por evento', 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', '', '#0066FF', 0, 'Contratar plano', '#', 0);
+        insertPlan.run('Professional', 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', 'R$ 1.990', 'por evento', 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', '★ Mais Popular', '#00FF88', 1, 'Contratar plano', '#', 1);
+        insertPlan.run('Enterprise', 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', 'Sob consulta', 'personalizado', 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', 'Premium', '#0066FF', 0, 'Solicitar proposta', '#', 2);
+      }
 
-if (db.prepare('SELECT COUNT(*) as count FROM services').get().count === 0) {
-  const insertService = db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)');
-  insertService.run('Internet Dedicada', 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', 'Wifi', 0);
-  insertService.run('Gerenciamento de Rede', 'Monitoramento em tempo real para garantir máxima segurança e performance.', 'Activity', 1);
-  insertService.run('Estabilidade para Pagamentos', 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', 'Zap', 2);
-  insertService.run('Banco de Baterias', 'Nobreaks de alta performance inclusos para garantir energia constante.', 'Battery', 3);
-  insertService.run('Suporte Presencial', 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', 'Headset', 4);
-}
+      if (supabase) {
+        console.log('Checking Supabase plans...');
+        const { data: supabasePlans, error: countError } = await supabase.from('plans').select('id', { count: 'exact', head: true });
+        
+        if (!countError && (!supabasePlans || supabasePlans.length === 0)) {
+          console.log('Seeding plans into Supabase...');
+          const initialPlans = [
+            { name: 'Starter', description: 'Ideal para eventos pequenos com até 200 pessoas', price: 'R$ 890', period: 'por evento', features: 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', badge_text: '', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Contratar plano', cta_url: '#', order_index: 0 },
+            { name: 'Professional', description: 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', price: 'R$ 1.990', period: 'por evento', features: 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', badge_text: '★ Mais Popular', highlight_color: '#00FF88', is_featured: 1, cta_text: 'Contratar plano', cta_url: '#', order_index: 1 },
+            { name: 'Enterprise', description: 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', price: 'Sob consulta', period: 'personalizado', features: 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', badge_text: 'Premium', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Solicitar proposta', cta_url: '#', order_index: 2 }
+          ];
+          const { error: insertError } = await supabase.from('plans').insert(initialPlans);
+          if (insertError) console.error('Error seeding plans to Supabase:', insertError.message, insertError.code, insertError.hint);
+        }
+      }
+    } catch (err) {
+      console.error('Seeding plans error:', err);
+    }
+  };
+
+  const seedServices = async () => {
+    try {
+      const sqliteCount: any = db.prepare('SELECT COUNT(*) as count FROM services').get();
+      if (sqliteCount.count === 0) {
+        console.log('Seeding services into SQLite...');
+        const insertService = db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)');
+        insertService.run('Internet Dedicada', 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', 'Wifi', 0);
+        insertService.run('Gerenciamento de Rede', 'Monitoramento em tempo real para garantir máxima segurança e performance.', 'Activity', 1);
+        insertService.run('Estabilidade para Pagamentos', 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', 'Zap', 2);
+        insertService.run('Banco de Baterias', 'Nobreaks de alta performance inclusos para garantir energia constante.', 'Battery', 3);
+        insertService.run('Suporte Presencial', 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', 'Headset', 4);
+      }
+
+      if (supabase) {
+        const { data: supabaseServices, error: countError } = await supabase.from('services').select('id', { count: 'exact', head: true });
+        if (!countError && (!supabaseServices || supabaseServices.length === 0)) {
+          console.log('Seeding services into Supabase...');
+          const initialServices = [
+            { title: 'Internet Dedicada', description: 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', icon: 'Wifi', order_index: 0 },
+            { title: 'Gerenciamento de Rede', description: 'Monitoramento em tempo real para garantir máxima segurança e performance.', icon: 'Activity', order_index: 1 },
+            { title: 'Estabilidade para Pagamentos', description: 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', icon: 'Zap', order_index: 2 },
+            { title: 'Banco de Baterias', description: 'Nobreaks de alta performance inclusos para garantir energia constante.', icon: 'Battery', order_index: 3 },
+            { title: 'Suporte Presencial', description: 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', icon: 'Headset', order_index: 4 }
+          ];
+          const { error: insertError } = await supabase.from('services').insert(initialServices);
+          if (insertError) console.error('Error seeding services to Supabase:', insertError.message, insertError.code, insertError.hint);
+        }
+      }
+    } catch (err) {
+      console.error('Seeding services error:', err);
+    }
+  };
 
 async function startServer() {
+  // Run seeding
+  await seedUsers();
+  await seedPlans();
+  await seedServices();
+
   const app = express();
   
   // 1. Logging Middleware - MUST BE FIRST
@@ -287,6 +396,12 @@ async function startServer() {
 
   // 4. API Routes
   const api = express.Router();
+
+  // Add a dedicated logger for API requests
+  api.use((req, res, next) => {
+    console.log(`[API] ${req.method} ${req.url}`);
+    next();
+  });
 
   api.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
@@ -317,18 +432,26 @@ async function startServer() {
 
       let user;
       if (supabase) {
+        console.log(`[LOGIN] checking Supabase for user: ${username}`);
         const { data, error } = await supabase.from('users').select('*').eq('username', username).maybeSingle();
-        if (error) throw error;
+        if (error) {
+          console.error('[LOGIN] Supabase error:', error.message);
+        }
         user = data;
-      } else {
+      }
+      
+      if (!user) {
+        console.log(`[LOGIN] checking SQLite for user: ${username}`);
         user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
       }
       
       if (!user) {
+        console.log(`Login failed: user ${username} not found`);
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
       if (!bcrypt.compareSync(password, user.password_hash)) {
+        console.log(`Login failed: invalid password for ${username}`);
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
@@ -344,11 +467,8 @@ async function startServer() {
     }
   });
 
-
-
-
-  // Auth: Verify 2FA
-  app.post('/api/auth/verify-2fa', async (req, res) => {
+  // Auth routes moved to API router for consistency
+  api.post('/auth/verify-2fa', async (req, res) => {
     const { userId, code } = req.body;
     let user;
     if (supabase) {
@@ -372,8 +492,7 @@ async function startServer() {
     res.json({ token });
   });
 
-  // Auth: Forgot Password
-  app.post('/api/auth/forgot-password', async (req, res) => {
+  api.post('/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     console.log(`Solicitação de recuperação de senha para: ${email}`);
     
@@ -399,24 +518,38 @@ async function startServer() {
       db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?').run(resetToken, expiry, user.id);
     }
 
-    // No ambiente real, enviaríamos o e-mail aqui.
-    // Como estamos em um ambiente de desenvolvimento sem provedor SMTP configurado, logamos o link no console.
     const resetLink = `${req.headers.origin}/admin/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
     
-    console.log(`
-      --- E-MAIL DE RECUPERAÇÃO ENVIADO PARA: ${email} ---
-      Olá, ${user.username}!
-      Você solicitou a recuperação de sua senha no sistema InfraLink Eventos.
-      Para redefinir sua senha, clique no link abaixo (válido por 1 hora):
-      ${resetLink}
-      ---------------------------------------------------
-    `);
+    const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+        <h2 style="color: #00FF88;">Redefinição de Senha - InfraLink Eventos</h2>
+        <p>Olá, <strong>${user.username}</strong>,</p>
+        <p>Recebemos uma solicitação para redefinir a senha da sua conta no sistema InfraLink Eventos.</p>
+        <p>Para prosseguir com a redefinição, clique no botão abaixo:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background-color: #00FF88; color: #000; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Redefinir Minha Senha</a>
+        </div>
+        <p style="color: #666; font-size: 14px;">Este link é válido por apenas 1 hora. Se você não solicitou esta alteração, pode ignorar este e-mail com segurança.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        <p style="font-size: 12px; color: #999;">Esta é uma mensagem automática. Por favor, não responda.</p>
+      </div>
+    `;
 
-    res.json({ success: true, message: 'Instruções de recuperação enviadas para o e-mail.' });
+    try {
+      await sendEmail({
+        to: email,
+        subject: 'Recuperação de Senha - InfraLink Eventos',
+        html: emailHtml
+      });
+      res.json({ success: true, message: 'Instruções de recuperação enviadas para o e-mail.' });
+    } catch (err) {
+      console.error('Error in forgot-password flow:', err);
+      // Still return success to prevent email enumeration, or return error if SMTP failed and we want to let client know
+      res.status(500).json({ message: 'Erro ao enviar e-mail de recuperação.' });
+    }
   });
 
-  // Auth: Reset Password
-  app.post('/api/auth/reset-password', async (req, res) => {
+  api.post('/auth/reset-password', async (req, res) => {
     const { email, token, newPassword } = req.body;
     
     let user;
@@ -442,8 +575,7 @@ async function startServer() {
     res.json({ success: true, message: 'Senha redefinida com sucesso.' });
   });
 
-  // Auth: Setup 2FA
-  app.get('/api/auth/setup-2fa', authenticate, async (req, res) => {
+  api.get('/auth/setup-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     let user;
     if (supabase) {
@@ -469,7 +601,7 @@ async function startServer() {
     res.json({ qrCode, secret });
   });
 
-  app.post('/api/auth/enable-2fa', authenticate, async (req, res) => {
+  api.post('/auth/enable-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     const { code } = req.body;
     
@@ -496,7 +628,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/auth/disable-2fa', authenticate, async (req, res) => {
+  api.post('/auth/disable-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     if (supabase) {
       await supabase.from('users').update({ two_factor_enabled: 0, two_factor_secret: null }).eq('id', userId);
@@ -506,7 +638,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get('/api/auth/me', authenticate, async (req, res) => {
+  api.get('/auth/me', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     let user;
     if (supabase) {
@@ -530,8 +662,8 @@ async function startServer() {
     });
   }
 
-  // Content API
-  app.get('/api/content', async (req, res) => {
+  // Content API (Moved to API router)
+  api.get('/content', async (req, res) => {
     let content;
     if (supabase) {
       const { data, error } = await supabase.from('page_content').select('*');
@@ -551,7 +683,7 @@ async function startServer() {
     res.json(formatted);
   });
 
-  app.post('/api/admin/content', authenticate, async (req, res) => {
+  api.post('/admin/content', authenticate, async (req, res) => {
     const { section, key, value } = req.body;
     if (supabase) {
       const { error } = await supabase
@@ -564,7 +696,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/admin/content/batch', authenticate, async (req, res) => {
+  api.post('/admin/content/batch', authenticate, async (req, res) => {
     const { updates } = req.body;
     if (!Array.isArray(updates)) return res.status(400).json({ message: 'Updates must be an array' });
     
@@ -582,19 +714,33 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Plans API
-  app.get('/api/plans', async (req, res) => {
-    if (supabase) {
-      const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
-      if (error) return res.status(500).json({ message: error.message });
-      res.json(data);
-    } else {
-      const plans = db.prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
-      res.json(plans);
+  // Plans API (Moved to API router)
+  api.get('/plans', async (req, res) => {
+    try {
+      let plans;
+      if (supabase) {
+        const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
+        if (!error && data && data.length > 0) {
+          console.log(`Fetched ${data.length} plans from Supabase`);
+          plans = data;
+        } else if (error) {
+          console.error('Supabase plans error:', error.message);
+        }
+      }
+      
+      if (!plans) {
+        plans = db.prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
+        console.log(`Fetched ${plans?.length || 0} plans from SQLite`);
+      }
+      
+      res.json(plans || []);
+    } catch (err: any) {
+      console.error('Error fetching plans:', err);
+      res.status(500).json({ message: err.message });
     }
   });
 
-  app.post('/api/plans/:id/click', async (req, res) => {
+  api.post('/plans/:id/click', async (req, res) => {
     try {
       const { id } = req.params;
       const dayOfWeek = new Date().getDay();
@@ -610,7 +756,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/stats/plan-clicks', authenticate, async (req, res) => {
+  api.get('/admin/stats/plan-clicks', authenticate, async (req, res) => {
     const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     let stats;
     
@@ -624,7 +770,6 @@ async function startServer() {
       
       if (error) return res.status(500).json({ message: error.message });
       
-      // Group by day of week manually for Supabase result
       const counts: any = {};
       data.forEach((row: any) => {
         counts[row.day_of_week] = (counts[row.day_of_week] || 0) + 1;
@@ -649,19 +794,30 @@ async function startServer() {
     res.json(formattedStats);
   });
 
-  // Services API
-  app.get('/api/services', async (req, res) => {
-    if (supabase) {
-      const { data, error } = await supabase.from('services').select('*').order('order_index', { ascending: true });
-      if (error) return res.status(500).json({ message: error.message });
-      res.json(data);
-    } else {
-      const services = db.prepare('SELECT * FROM services ORDER BY order_index ASC').all();
-      res.json(services);
+  // Services API (Moved to API router)
+  api.get('/services', async (req, res) => {
+    try {
+      let services;
+      if (supabase) {
+        const { data, error } = await supabase.from('services').select('*').order('order_index', { ascending: true });
+        if (!error && data && data.length > 0) {
+          services = data;
+        } else if (error) {
+          console.error('Supabase services error:', error.message);
+        }
+      }
+      
+      if (!services) {
+        services = db.prepare('SELECT * FROM services ORDER BY order_index ASC').all();
+      }
+      
+      res.json(services || []);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 
-  app.post('/api/admin/services', authenticate, async (req, res) => {
+  api.post('/admin/services', authenticate, async (req, res) => {
     const { title, description, icon, order_index } = req.body;
     if (supabase) {
       const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
@@ -672,7 +828,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.put('/api/admin/services/:id', authenticate, async (req, res) => {
+  api.put('/admin/services/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { title, description, icon, order_index } = req.body;
     if (supabase) {
@@ -684,7 +840,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.delete('/api/admin/services/:id', authenticate, async (req, res) => {
+  api.delete('/admin/services/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
       const { error } = await supabase.from('services').delete().eq('id', id);
@@ -695,7 +851,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/admin/plans', authenticate, async (req, res) => {
+  api.post('/admin/plans', authenticate, async (req, res) => {
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
     if (supabase) {
       const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
@@ -706,7 +862,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.put('/api/admin/plans/:id', authenticate, async (req, res) => {
+  api.put('/admin/plans/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
     if (supabase) {
@@ -718,7 +874,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.delete('/api/admin/plans/:id', authenticate, async (req, res) => {
+  api.delete('/admin/plans/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
       const { error } = await supabase.from('plans').delete().eq('id', id);
@@ -729,8 +885,8 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Customers API
-  app.get('/api/admin/customers', authenticate, async (req, res) => {
+  // Customers API (Moved to API router)
+  api.get('/admin/customers', authenticate, async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
       if (error) return res.status(500).json({ message: error.message });
@@ -741,7 +897,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/customers', authenticate, async (req, res) => {
+  api.post('/admin/customers', authenticate, async (req, res) => {
     const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
     if (supabase) {
       const { error } = await supabase.from('customers').insert({ name, location, event_date, budget, cost: cost || 0, status: status || 'Pendente', start_date, end_date, phone, email, plan_id });
@@ -752,7 +908,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.put('/api/admin/customers/:id', authenticate, async (req, res) => {
+  api.put('/admin/customers/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
     if (supabase) {
@@ -764,7 +920,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.delete('/api/admin/customers/:id', authenticate, async (req, res) => {
+  api.delete('/admin/customers/:id', authenticate, async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ message: 'ID inválido' });
 
@@ -777,8 +933,8 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // --- Inventory API ---
-  app.get('/api/admin/inventory', authenticate, async (req, res) => {
+  // Inventory API (Moved to API router)
+  api.get('/admin/inventory', authenticate, async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
       if (error) return res.status(500).json({ message: error.message });
@@ -789,7 +945,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/inventory', authenticate, async (req, res) => {
+  api.post('/admin/inventory', authenticate, async (req, res) => {
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
     if (supabase) {
       const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status: status || 'Ativo' });
@@ -800,7 +956,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.put('/api/admin/inventory/:id', authenticate, async (req, res) => {
+  api.put('/admin/inventory/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
     if (supabase) {
@@ -812,7 +968,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.delete('/api/admin/inventory/:id', authenticate, async (req, res) => {
+  api.delete('/admin/inventory/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
       const { error } = await supabase.from('inventory').delete().eq('id', id);

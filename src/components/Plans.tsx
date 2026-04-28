@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Check, ArrowUpRight, Zap } from 'lucide-react';
+import { safeFetch } from '../lib/fetch';
 
 interface Plan {
   id: number;
@@ -22,9 +23,21 @@ export default function Plans() {
   const [plans, setPlans] = useState<Plan[]>([]);
 
   useEffect(() => {
-    fetch(`/api/plans?t=${Date.now()}`)
-      .then(res => res.json())
-      .then(data => setPlans(data));
+    console.log('Fetching plans...');
+    safeFetch(`/api/plans?t=${Date.now()}`)
+      .then(data => {
+        console.log('Plans data received:', data);
+        if (Array.isArray(data)) {
+          setPlans(data);
+        } else {
+          console.error('Data received for plans is not an array:', data);
+          setPlans([]);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch plans:', err);
+        setPlans([]); // Ensure it's an empty array on error
+      });
   }, []);
 
   return (
@@ -112,7 +125,7 @@ export default function Plans() {
                     <a 
                       href={plan.cta_url || "#contato"}
                       onClick={() => {
-                        fetch(`/api/plans/${plan.id}/click`, { method: 'POST' });
+                        safeFetch(`/api/plans/${plan.id}/click`, { method: 'POST' }).catch(() => {});
                       }}
                       className={`block w-full py-5 text-center font-black text-[11px] uppercase tracking-widest transition-all rounded-2xl border ${isFeatured ? 'text-brand-black border-transparent shadow-xl hover:-translate-y-1' : 'bg-white/5 text-white border-white/10 hover:bg-white/10 hover:border-white/20'}`}
                       style={isFeatured ? { 

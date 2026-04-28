@@ -9,14 +9,15 @@ import Dashboard from './admin/Dashboard';
 import ResetPassword from './admin/ResetPassword';
 import { Instagram } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { safeFetch } from './lib/fetch';
 
 function LandingPage() {
   const [content, setContent] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/content')
-      .then(res => res.json())
-      .then(data => setContent(data.footer));
+    safeFetch('/api/content')
+      .then(data => setContent(data.footer))
+      .catch(err => console.error('Failed to fetch footer content:', err));
   }, []);
 
   return (
