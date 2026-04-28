@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS page_content (
 -- Services Table
 CREATE TABLE IF NOT EXISTS services (
   id SERIAL PRIMARY KEY,
-  title TEXT UNIQUE,
+  title TEXT,
   description TEXT,
   icon TEXT,
   order_index INTEGER DEFAULT 0
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS services (
 -- Plans Table
 CREATE TABLE IF NOT EXISTS plans (
   id SERIAL PRIMARY KEY,
-  name TEXT UNIQUE,
+  name TEXT,
   description TEXT,
   price TEXT,
   period TEXT,
@@ -59,6 +59,28 @@ CREATE TABLE IF NOT EXISTS plans (
   order_index INTEGER DEFAULT 0,
   budget_text TEXT
 );
+
+-- Ensure UNIQUE constraints exist for ON CONFLICT to work (cleanup duplicates first)
+DO $$
+BEGIN
+    -- For services.title
+    DELETE FROM services a USING services b WHERE a.id > b.id AND a.title = b.title;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'services_title_key') THEN
+        ALTER TABLE services ADD CONSTRAINT services_title_key UNIQUE (title);
+    END IF;
+
+    -- For plans.name
+    DELETE FROM plans a USING plans b WHERE a.id > b.id AND a.name = b.name;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'plans_name_key') THEN
+        ALTER TABLE plans ADD CONSTRAINT plans_name_key UNIQUE (name);
+    END IF;
+
+    -- For page_content (section, key)
+    DELETE FROM page_content a USING page_content b WHERE a.id > b.id AND a.section = b.section AND a.key = b.key;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'page_content_section_key_key') THEN
+        ALTER TABLE page_content ADD CONSTRAINT page_content_section_key_key UNIQUE (section, key);
+    END IF;
+END $$;
 
 -- Customers Table
 CREATE TABLE IF NOT EXISTS customers (
