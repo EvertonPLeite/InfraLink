@@ -499,8 +499,18 @@ async function startServer() {
   
   const app = express();
   
-  // 1. Logging Middleware - MUST BE FIRST
+  // 1. Logging Middleware - Filtered to reduce noise from Vite source files
   app.use((req, res, next) => {
+    // Only log API requests, navigation, or errors
+    // Ignore internal Vite requests and common source/asset files to reduce clutter
+    const isViteRequest = req.url.startsWith('/@') || req.url.startsWith('/node_modules') || req.url.includes('?v=') || req.url.includes('?t=');
+    const isSourceFile = req.url.match(/\.(tsx?|jsx?|css|html|json)$/);
+    const isAsset = req.url.match(/\.(png|jpg|jpeg|gif|svg|woff2?|ttf|eot|ico)$/);
+
+    if (isViteRequest || isSourceFile || isAsset) {
+      return next();
+    }
+
     const start = Date.now();
     res.on('finish', () => {
       const duration = Date.now() - start;
