@@ -10,6 +10,7 @@ import Dashboard from './admin/Dashboard';
 import ResetPassword from './admin/ResetPassword';
 import { Instagram } from 'lucide-react';
 import { safeFetch } from './lib/fetch';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function LandingPage() {
   const [content, setContent] = useState<any>(null);
@@ -74,8 +75,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!token) return <Navigate to="/admin/login" replace />;
   return <>{children}</>;
 }
-
-import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   return (

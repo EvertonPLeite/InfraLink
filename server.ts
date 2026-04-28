@@ -18,9 +18,22 @@ const __dirname = path.dirname(__filename);
 // API Keys and Secrets
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'infralink-super-secret-key';
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+
+// Enhanced Supabase Config Detection
+const getEnv = (key: string) => {
+  const val = process.env[key];
+  return val && val.trim() !== '' && !val.includes('...') ? val.trim() : undefined;
+};
+
+const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL') || getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
+const SUPABASE_KEY = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY') || getEnv('SUPABASE_PUBLISHABLE_KEY') || getEnv('VITE_SUPABASE_ANON_KEY');
+const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY') || getEnv('SUPABASE_SECRET_KEY') || getEnv('SUPABASE_SERVICE_KEY');
+
+console.log('--- SUPABASE ENVIRONMENT CHECK ---');
+console.log('URL defined:', !!SUPABASE_URL);
+console.log('Anon Key defined:', !!SUPABASE_KEY);
+console.log('Service Role Key defined:', !!SUPABASE_SERVICE_ROLE_KEY);
+console.log('---------------------------------');
 
 // SMTP Config
 const smtpConfig = {
@@ -73,18 +86,61 @@ const isValidSupabaseConfig = (url: string | undefined, key: string | undefined)
   }
 };
 
-if (isValidSupabaseConfig(SUPABASE_URL, SUPABASE_KEY)) {
-  try {
-    // Use service role key if available to bypass RLS on server-side
-    const keyToUse = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_KEY;
-    supabase = createClient(SUPABASE_URL!, keyToUse!);
-    console.log(`Supabase client initialized successfully using ${SUPABASE_SERVICE_ROLE_KEY ? 'service_role' : 'anon'} key`);
-  } catch (err) {
-    console.error('Failed to initialize Supabase client:', err);
-    supabase = null;
+async function initSupabase() {
+  if (!isValidSupabaseConfig(SUPABASE_URL, SUPABASE_KEY)) {
+    console.log('Supabase config missing or invalid. Falling back to SQLite.');
+    return null;
   }
-} else {
-  console.log('Supabase credentials missing, invalid or empty. Falling back to SQLite.');
+
+  try {
+    const isProbablyValidSecret = (s: string | undefined) => s && s.length > 20 && !s.includes(' ') && !s.includes('...');
+    let keyToUse = SUPABASE_KEY;
+    let keyType = 'anon';
+
+    if (isProbablyValidSecret(SUPABASE_SERVICE_ROLE_KEY)) {
+      keyToUse = SUPABASE_SERVICE_ROLE_KEY!;
+      keyType = 'service_role';
+    }
+
+    const client = createClient(SUPABASE_URL!, keyToUse!, {
+      auth: { persistSession: false }
+    });
+
+    console.log(`Verifying Supabase connection using ${keyType} key...`);
+    
+    // We try to fetch from 'plans' to verify the key. 
+    // If the key is invalid, Supabase returns a 401/403.
+    const { error } = await client.from('plans').select('id').limit(1);
+    
+    if (error) {
+      // If error is "Invalid API key", we definitely want to fall back.
+      if (error.message.includes('Invalid API key') || error.code === 'PGRST301' || error.message.includes('JWT')) {
+        console.error(`Supabase verification failed with terminal error: ${error.message}`);
+        
+        // If we tried service_role and it failed, try anon as last resort for verification
+        if (keyType === 'service_role') {
+          console.log('Retrying verification with anon key...');
+          const anonClient = createClient(SUPABASE_URL!, SUPABASE_KEY!, { auth: { persistSession: false } });
+          const { error: anonError } = await anonClient.from('plans').select('id').limit(1);
+          if (!anonError) return anonClient;
+        }
+        return null;
+      }
+      
+      // If the error is "relation does not exist", the key is likely VALID but the table is missing.
+      // In this case, we SHOULD still return the client so it can try to seed or use other tables,
+      // OR we just fallback to SQLite if the DB is not setup.
+      // Given the requirement, falling back to SQLite is safer.
+      console.log(`Supabase verification returned error (likely missing table): ${error.message}. Falling back to SQLite.`);
+      return null;
+    }
+    
+    console.log(`Supabase connection verified successfully using ${keyType} key`);
+    return client;
+  } catch (err) {
+    console.error('Failed to initialize Supabase:', err);
+    return null;
+  }
 }
 
 // Database Setup (SQLite fallback)
@@ -151,7 +207,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
+    title TEXT UNIQUE,
     description TEXT,
     icon TEXT,
     order_index INTEGER DEFAULT 0
@@ -159,7 +215,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
+    name TEXT UNIQUE,
     description TEXT,
     price TEXT,
     period TEXT,
@@ -223,6 +279,16 @@ try {
   const columns = db.prepare("PRAGMA table_info(services)").all() as any[];
   if (!columns.some(col => col.name === 'icon')) {
     db.prepare('ALTER TABLE services ADD COLUMN icon TEXT').run();
+  }
+  
+  // Cleanup duplicates in SQLite if they exist before adding UNIQUE index (if we were already at this step)
+  const duplicates = db.prepare('SELECT title, COUNT(*) as count FROM services GROUP BY title HAVING count > 1').all() as any[];
+  if (duplicates.length > 0) {
+    console.log('Cleaning up duplicate services in SQLite...');
+    duplicates.forEach(dup => {
+      const firstId = db.prepare('SELECT id FROM services WHERE title = ? ORDER BY id ASC LIMIT 1').get(dup.title) as any;
+      db.prepare('DELETE FROM services WHERE title = ? AND id != ?').run(dup.title, firstId.id);
+    });
   }
 } catch (e) {
   console.error("Services migration error:", e);
@@ -304,28 +370,47 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
   // Seed Initial Data
   const seedPlans = async () => {
     try {
-      const sqliteCount: any = db.prepare('SELECT COUNT(*) as count FROM plans').get();
-      if (sqliteCount.count === 0) {
-        console.log('Seeding plans into SQLite...');
-        const insertPlan = db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        insertPlan.run('Starter', 'Ideal para eventos pequenos com até 200 pessoas', 'R$ 890', 'por evento', 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', '', '#0066FF', 0, 'Contratar plano', '#', 0);
-        insertPlan.run('Professional', 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', 'R$ 1.990', 'por evento', 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', '★ Mais Popular', '#00FF88', 1, 'Contratar plano', '#', 1);
-        insertPlan.run('Enterprise', 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', 'Sob consulta', 'personalizado', 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', 'Premium', '#0066FF', 0, 'Solicitar proposta', '#', 2);
+      const initialPlans = [
+        { name: 'Starter', description: 'Ideal para eventos pequenos com até 200 pessoas', price: 'R$ 890', period: 'por evento', features: 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', badge_text: '', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Contratar plano', cta_url: '#', order_index: 0 },
+        { name: 'Professional', description: 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', price: 'R$ 1.990', period: 'por evento', features: 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', badge_text: '★ Mais Popular', highlight_color: '#00FF88', is_featured: 1, cta_text: 'Contratar plano', cta_url: '#', order_index: 1 },
+        { name: 'Enterprise', description: 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', price: 'Sob consulta', period: 'personalizado', features: 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', badge_text: 'Premium', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Solicitar proposta', cta_url: '#', order_index: 2 }
+      ];
+
+      // SQLite individual checks
+      for (const plan of initialPlans) {
+        const exists = db.prepare('SELECT id FROM plans WHERE name = ?').get(plan.name);
+        if (!exists) {
+          db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(plan.name, plan.description, plan.price, plan.period, plan.features, plan.badge_text, plan.highlight_color, plan.is_featured, plan.cta_text, plan.cta_url, plan.order_index);
+        }
       }
 
       if (supabase) {
-        console.log('Checking Supabase plans...');
-        const { data: supabasePlans, error: countError } = await supabase.from('plans').select('id', { count: 'exact', head: true });
-        
-        if (!countError && (!supabasePlans || supabasePlans.length === 0)) {
-          console.log('Seeding plans into Supabase...');
-          const initialPlans = [
-            { name: 'Starter', description: 'Ideal para eventos pequenos com até 200 pessoas', price: 'R$ 890', period: 'por evento', features: 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', badge_text: '', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Contratar plano', cta_url: '#', order_index: 0 },
-            { name: 'Professional', description: 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', price: 'R$ 1.990', period: 'por evento', features: 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', badge_text: '★ Mais Popular', highlight_color: '#00FF88', is_featured: 1, cta_text: 'Contratar plano', cta_url: '#', order_index: 1 },
-            { name: 'Enterprise', description: 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', price: 'Sob consulta', period: 'personalizado', features: 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', badge_text: 'Premium', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Solicitar proposta', cta_url: '#', order_index: 2 }
-          ];
-          const { error: insertError } = await supabase.from('plans').insert(initialPlans);
-          if (insertError) console.error('Error seeding plans to Supabase:', insertError.message, insertError.code, insertError.hint);
+        console.log('Seeding/Syncing plans into Supabase...');
+
+        // Manual cleanup for Supabase if needed
+        const { data: existingSupabasePlans } = await supabase.from('plans').select('id, name').order('id', { ascending: true });
+        if (existingSupabasePlans && existingSupabasePlans.length > 0) {
+          const namesSeen = new Set();
+          const toDelete = [];
+          for (const p of existingSupabasePlans) {
+            if (namesSeen.has(p.name)) {
+              toDelete.push(p.id);
+            } else {
+              namesSeen.add(p.name);
+            }
+          }
+          if (toDelete.length > 0) {
+            console.log(`Deleting ${toDelete.length} duplicate plans from Supabase...`);
+            await supabase.from('plans').delete().in('id', toDelete);
+          }
+        }
+
+        const { error: upsertError } = await supabase.from('plans').upsert(initialPlans, { onConflict: 'name' });
+        if (upsertError) {
+          console.error('Error upserting plans to Supabase:', upsertError.message);
+          for (const plan of initialPlans) {
+            await supabase.from('plans').upsert(plan, { onConflict: 'name' });
+          }
         }
       }
     } catch (err) {
@@ -335,30 +420,51 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
 
   const seedServices = async () => {
     try {
-      const sqliteCount: any = db.prepare('SELECT COUNT(*) as count FROM services').get();
-      if (sqliteCount.count === 0) {
-        console.log('Seeding services into SQLite...');
-        const insertService = db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)');
-        insertService.run('Internet Dedicada', 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', 'Wifi', 0);
-        insertService.run('Gerenciamento de Rede', 'Monitoramento em tempo real para garantir máxima segurança e performance.', 'Activity', 1);
-        insertService.run('Estabilidade para Pagamentos', 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', 'Zap', 2);
-        insertService.run('Banco de Baterias', 'Nobreaks de alta performance inclusos para garantir energia constante.', 'Battery', 3);
-        insertService.run('Suporte Presencial', 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', 'Headset', 4);
+      const initialServices = [
+        { title: 'Internet Dedicada', description: 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', icon: 'Wifi', order_index: 0 },
+        { title: 'Gerenciamento de Rede', description: 'Monitoramento em tempo real para garantir máxima segurança e performance.', icon: 'Activity', order_index: 1 },
+        { title: 'Estabilidade para Pagamentos', description: 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', icon: 'Zap', order_index: 2 },
+        { title: 'Banco de Baterias', description: 'Nobreaks de alta performance inclusos para garantir energia constante.', icon: 'Battery', order_index: 3 },
+        { title: 'Suporte Presencial', description: 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', icon: 'Headset', order_index: 4 }
+      ];
+
+      // SQLite individual checks
+      for (const service of initialServices) {
+        const exists = db.prepare('SELECT id FROM services WHERE title = ?').get(service.title);
+        if (!exists) {
+          db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(service.title, service.description, service.icon, service.order_index);
+        }
       }
 
       if (supabase) {
-        const { data: supabaseServices, error: countError } = await supabase.from('services').select('id', { count: 'exact', head: true });
-        if (!countError && (!supabaseServices || supabaseServices.length === 0)) {
-          console.log('Seeding services into Supabase...');
-          const initialServices = [
-            { title: 'Internet Dedicada', description: 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', icon: 'Wifi', order_index: 0 },
-            { title: 'Gerenciamento de Rede', description: 'Monitoramento em tempo real para garantir máxima segurança e performance.', icon: 'Activity', order_index: 1 },
-            { title: 'Estabilidade para Pagamentos', description: 'Rede exclusiva para máquinas de cartão e caixas, evitando filas e perdas nas vendas.', icon: 'Zap', order_index: 2 },
-            { title: 'Banco de Baterias', description: 'Nobreaks de alta performance inclusos para garantir energia constante.', icon: 'Battery', order_index: 3 },
-            { title: 'Suporte Presencial', description: 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', icon: 'Headset', order_index: 4 }
-          ];
-          const { error: insertError } = await supabase.from('services').insert(initialServices);
-          if (insertError) console.error('Error seeding services to Supabase:', insertError.message, insertError.code, insertError.hint);
+        console.log('Seeding/Syncing services into Supabase...');
+        
+        // Manual cleanup for Supabase if needed (before unique constraint might be active)
+        const { data: existingSupabaseServices } = await supabase.from('services').select('id, title').order('id', { ascending: true });
+        if (existingSupabaseServices && existingSupabaseServices.length > 0) {
+          const titlesSeen = new Set();
+          const toDelete = [];
+          for (const s of existingSupabaseServices) {
+            if (titlesSeen.has(s.title)) {
+              toDelete.push(s.id);
+            } else {
+              titlesSeen.add(s.title);
+            }
+          }
+          if (toDelete.length > 0) {
+            console.log(`Deleting ${toDelete.length} duplicate services from Supabase...`);
+            await supabase.from('services').delete().in('id', toDelete);
+          }
+        }
+
+        // Using upsert with onConflict on title
+        const { error: upsertError } = await supabase.from('services').upsert(initialServices, { onConflict: 'title' });
+        if (upsertError) {
+          console.error('Error upserting services to Supabase:', upsertError.message);
+          // Fallback: individual upsert if bulk fails
+          for (const service of initialServices) {
+            await supabase.from('services').upsert(service, { onConflict: 'title' });
+          }
         }
       }
     } catch (err) {
@@ -367,11 +473,18 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
   };
 
 async function startServer() {
+  // Initialize Supabase before anything else
+  supabase = await initSupabase();
+  
   const app = express();
   
   // 1. Logging Middleware - MUST BE FIRST
   app.use((req, res, next) => {
-    console.log(`[REQ] ${req.method} ${req.url}`);
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      console.log(`[REQ] ${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
+    });
     next();
   });
 
@@ -680,23 +793,33 @@ async function startServer() {
 
   // Content API (Moved to API router)
   api.get('/content', async (req, res) => {
-    let content;
-    if (supabase) {
-      const { data, error } = await supabase.from('page_content').select('*');
-      if (error) return res.status(500).json({ message: error.message });
-      content = data;
-    } else {
-      content = db.prepare('SELECT * FROM page_content').all();
+    try {
+      let content;
+      if (supabase) {
+        const { data, error } = await supabase.from('page_content').select('*');
+        if (!error && data) {
+          content = data;
+        } else if (error) {
+          console.warn('Supabase content fetch failed, falling back to SQLite:', error.message);
+        }
+      }
+      
+      if (!content) {
+        content = db.prepare('SELECT * FROM page_content').all();
+      }
+      
+      const formatted: any = {};
+      if (content && Array.isArray(content)) {
+        content.forEach((item: any) => {
+          if (!formatted[item.section]) formatted[item.section] = {};
+          formatted[item.section][item.key] = item.value;
+        });
+      }
+      res.json(formatted);
+    } catch (err: any) {
+      console.error('Content API error:', err);
+      res.status(500).json({ message: err.message });
     }
-    
-    const formatted: any = {};
-    if (content && Array.isArray(content)) {
-      content.forEach((item: any) => {
-        if (!formatted[item.section]) formatted[item.section] = {};
-        formatted[item.section][item.key] = item.value;
-      });
-    }
-    res.json(formatted);
   });
 
   api.post('/admin/content', authenticate, async (req, res) => {
@@ -737,16 +860,14 @@ async function startServer() {
       if (supabase) {
         const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
         if (!error && data && data.length > 0) {
-          console.log(`Fetched ${data.length} plans from Supabase`);
           plans = data;
         } else if (error) {
-          console.error('Supabase plans error:', error.message);
+          console.warn('Supabase plans fetch failed, falling back to SQLite:', error.message);
         }
       }
       
       if (!plans) {
         plans = db.prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
-        console.log(`Fetched ${plans?.length || 0} plans from SQLite`);
       }
       
       res.json(plans || []);
@@ -819,7 +940,7 @@ async function startServer() {
         if (!error && data && data.length > 0) {
           services = data;
         } else if (error) {
-          console.error('Supabase services error:', error.message);
+          console.warn('Supabase services fetch failed, falling back to SQLite:', error.message);
         }
       }
       
