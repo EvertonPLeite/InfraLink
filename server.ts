@@ -392,16 +392,19 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
   const seedPlans = async () => {
     try {
       const initialPlans = [
-        { name: 'Starter', description: 'Ideal para eventos pequenos com até 200 pessoas', price: 'R$ 890', period: 'por evento', features: 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', badge_text: '', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Contratar plano', cta_url: '#', order_index: 0 },
-        { name: 'Professional', description: 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', price: 'R$ 1.990', period: 'por evento', features: 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', badge_text: '★ Mais Popular', highlight_color: '#00FF88', is_featured: 1, cta_text: 'Contratar plano', cta_url: '#', order_index: 1 },
-        { name: 'Enterprise', description: 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', price: 'Sob consulta', period: 'personalizado', features: 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', badge_text: 'Premium', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Solicitar proposta', cta_url: '#', order_index: 2 }
+        { name: 'Starter', description: 'Ideal para eventos pequenos com até 200 pessoas', price: 'R$ 890', period: 'por evento', features: 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', badge_text: '', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Contratar plano', cta_url: 'https://wa.me/5535988019507?text=Olá!%20Tenho%20interesse%20no%20Plano%20Starter%20para%20meu%20evento.', order_index: 0 },
+        { name: 'Professional', description: 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', price: 'R$ 1.990', period: 'por evento', features: 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', badge_text: '★ Mais Popular', highlight_color: '#00FF88', is_featured: 1, cta_text: 'Contratar plano', cta_url: 'https://wa.me/5535988019507?text=Olá!%20Tenho%20interesse%20no%20Plano%20Professional%20para%20meu%20evento.', order_index: 1 },
+        { name: 'Enterprise', description: 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', price: 'Sob consulta', period: 'personalizado', features: 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', badge_text: 'Premium', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Solicitar proposta', cta_url: 'https://wa.me/5535988019507?text=Olá!%20Gostaria%20de%20solicitar%20um%20orçamento%20para%20o%20Plano%20Enterprise.', order_index: 2 }
       ];
 
-      // SQLite individual checks
+      // SQLite individual checks and updates for existing data
       for (const plan of initialPlans) {
-        const exists = db.prepare('SELECT id FROM plans WHERE name = ?').get(plan.name);
-        if (!exists) {
+        const existing = db.prepare('SELECT id, cta_url FROM plans WHERE name = ?').get(plan.name) as any;
+        if (!existing) {
           db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(plan.name, plan.description, plan.price, plan.period, plan.features, plan.badge_text, plan.highlight_color, plan.is_featured, plan.cta_text, plan.cta_url, plan.order_index);
+        } else if (existing.cta_url === '#' || !existing.cta_url) {
+          db.prepare('UPDATE plans SET cta_url = ? WHERE id = ?').run(plan.cta_url, existing.id);
+          console.log(`Updated SQLite plan URL for ${plan.name}`);
         }
       }
 
@@ -409,7 +412,7 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
         console.log('Seeding/Syncing plans into Supabase...');
 
         // Manual cleanup for Supabase if needed
-        const { data: existingSupabasePlans } = await supabase.from('plans').select('id, name').order('id', { ascending: true });
+        const { data: existingSupabasePlans } = await supabase.from('plans').select('id, name, cta_url').order('id', { ascending: true });
         if (existingSupabasePlans && existingSupabasePlans.length > 0) {
           const namesSeen = new Set();
           const toDelete = [];
@@ -418,6 +421,14 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
               toDelete.push(p.id);
             } else {
               namesSeen.add(p.name);
+              // Update existing if URL is '#'
+              if (p.cta_url === '#' || !p.cta_url) {
+                const target = initialPlans.find(ip => ip.name === p.name);
+                if (target) {
+                  await supabase.from('plans').update({ cta_url: target.cta_url }).eq('id', p.id);
+                  console.log(`Updated Supabase plan URL for ${p.name}`);
+                }
+              }
             }
           }
           if (toDelete.length > 0) {

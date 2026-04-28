@@ -81,24 +81,44 @@ function FinancialSummary({ customers = [], inventory = [] }: { customers: any[]
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Receita Total</p>
-            <div className="text-2xl font-black tracking-tighter">R$ {stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group flex items-start justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-2">Receita Total</p>
+              <div className="text-2xl font-black tracking-tighter">R$ {stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl text-white/20">
+              <DollarSign size={20} />
+            </div>
           </div>
           
-          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Custos Operacionais</p>
-            <div className="text-2xl font-black tracking-tighter text-orange-400">R$ {stats.totalOpsCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group flex items-start justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-2">Custos Operacionais</p>
+              <div className="text-2xl font-black tracking-tighter text-orange-400">R$ {stats.totalOpsCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div className="p-3 bg-orange-400/10 rounded-2xl text-orange-400/40">
+              <Activity size={20} />
+            </div>
           </div>
 
-          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 mb-2">Investimento Equip.</p>
-            <div className="text-2xl font-black tracking-tighter text-blue-400">R$ {stats.totalInventoryInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          <div className="glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group flex items-start justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-2">Investimento Equip.</p>
+              <div className="text-2xl font-black tracking-tighter text-blue-400">R$ {stats.totalInventoryInvestment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div className="p-3 bg-blue-400/10 rounded-2xl text-blue-400/40">
+              <Package size={20} />
+            </div>
           </div>
 
-          <div className="glass-panel p-6 rounded-[2rem] border-brand-neon/20 bg-brand-neon/5">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon/60 mb-2">Lucro Líquido</p>
-            <div className="text-2xl font-black tracking-tighter text-brand-neon">R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+          <div className={`glass-panel p-6 rounded-[2rem] border-white/5 relative overflow-hidden group flex items-start justify-between ${stats.profit < 0 ? 'border-red-500/20 bg-red-500/5' : 'border-brand-neon/20 bg-brand-neon/5'}`}>
+            <div>
+              <p className={`text-[10px] font-black uppercase tracking-[0.2em] mb-2 ${stats.profit < 0 ? 'text-red-400' : 'text-brand-neon/60'}`}>Lucro Líquido</p>
+              <div className={`text-2xl font-black tracking-tighter ${stats.profit < 0 ? 'text-red-500' : 'text-brand-neon'}`}>R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div className={`p-3 rounded-2xl ${stats.profit < 0 ? 'bg-red-500/10 text-red-500/40' : 'bg-brand-neon/10 text-brand-neon/40'}`}>
+              <BarChart3 size={20} />
+            </div>
           </div>
         </div>
 
@@ -569,13 +589,23 @@ function Analytics() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-         <div className="glass-panel p-8 rounded-3xl">
-            <div className="text-xs font-black uppercase text-white/20 mb-2">Total na Semana</div>
-            <div className="text-4xl font-black text-brand-neon">{totalClicksThisWeek}</div>
+         <div className="glass-panel p-8 rounded-3xl flex items-center justify-between">
+            <div>
+              <div className="text-xs font-black uppercase text-white/20 mb-2">Total na Semana</div>
+              <div className="text-4xl font-black text-brand-neon">{totalClicksThisWeek}</div>
+            </div>
+            <div className="p-4 bg-brand-neon/10 rounded-2xl text-brand-neon/40">
+              <BarChart3 size={24} />
+            </div>
          </div>
-         <div className="glass-panel p-8 rounded-3xl">
-            <div className="text-xs font-black uppercase text-white/20 mb-2">Média Diária</div>
-            <div className="text-4xl font-black text-white">{dailyAverage.toFixed(1)}</div>
+         <div className="glass-panel p-8 rounded-3xl flex items-center justify-between">
+            <div>
+              <div className="text-xs font-black uppercase text-white/20 mb-2">Média Diária</div>
+              <div className="text-4xl font-black text-white">{dailyAverage.toFixed(1)}</div>
+            </div>
+            <div className="p-4 bg-white/5 rounded-2xl text-white/20">
+              <Activity size={24} />
+            </div>
          </div>
       </div>
     </div>

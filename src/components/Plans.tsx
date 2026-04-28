@@ -123,7 +123,9 @@ export default function Plans() {
                     </ul>
                     
                     <a 
-                      href={plan.cta_url || "#contato"}
+                      href={plan.cta_url && plan.cta_url !== '#' ? plan.cta_url : "https://wa.me/5535988019507"}
+                      target="_blank"
+                      rel="noreferrer"
                       onClick={() => {
                         safeFetch(`/api/plans/${plan.id}/click`, { method: 'POST' }).catch(() => {});
                       }}
