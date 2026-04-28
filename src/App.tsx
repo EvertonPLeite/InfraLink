@@ -1,3 +1,4 @@
+import React, { Component, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -8,7 +9,6 @@ import Login from './admin/Login';
 import Dashboard from './admin/Dashboard';
 import ResetPassword from './admin/ResetPassword';
 import { Instagram } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
 import { safeFetch } from './lib/fetch';
 
 function LandingPage() {
@@ -75,22 +75,26 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/admin/login" element={<Login />} />
-        <Route path="/admin/reset-password" element={<ResetPassword />} />
-        <Route 
-          path="/admin/dashboard/*" 
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          } 
-        />
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/admin/login" element={<Login />} />
+          <Route path="/admin/reset-password" element={<ResetPassword />} />
+          <Route 
+            path="/admin/dashboard/*" 
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

@@ -23,7 +23,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-function FinancialSummary({ customers, inventory = [] }: { customers: any[], inventory?: any[] }) {
+function FinancialSummary({ customers = [], inventory = [] }: { customers: any[], inventory?: any[] }) {
   const calculateStats = () => {
     let received = 0;
     let toReceive = 0;
@@ -31,7 +31,11 @@ function FinancialSummary({ customers, inventory = [] }: { customers: any[], inv
     let totalRevenue = 0;
     let totalInventoryInvestment = 0;
 
-    customers.forEach(c => {
+    const safeCustomers = Array.isArray(customers) ? customers : [];
+    const safeInventory = Array.isArray(inventory) ? inventory : [];
+
+    safeCustomers.forEach(c => {
+      if (!c) return;
       const budget = parseFloat(c.budget) || 0;
       const cost = parseFloat(c.cost) || 0;
       
@@ -47,7 +51,8 @@ function FinancialSummary({ customers, inventory = [] }: { customers: any[], inv
       }
     });
 
-    inventory.forEach(item => {
+    safeInventory.forEach(item => {
+      if (!item) return;
       totalInventoryInvestment += parseFloat(item.price) || 0;
     });
 
@@ -472,7 +477,7 @@ function Analytics() {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
       .then(stats => {
-        setData(stats);
+        setData(Array.isArray(stats) ? stats : []);
         setLoading(false);
       })
       .catch(err => {
@@ -482,6 +487,9 @@ function Analytics() {
   }, []);
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
+
+  const totalClicksThisWeek = Array.isArray(data) ? data.reduce((acc, curr) => acc + (curr?.clicks || 0), 0) : 0;
+  const dailyAverage = totalClicksThisWeek / 7;
 
   return (
     <div className="space-y-12">
@@ -506,9 +514,9 @@ function Analytics() {
         </div>
         <ResponsiveContainer width="100%" height="80%">
           <BarChart 
-            data={data}
+            data={Array.isArray(data) ? data : []}
             onMouseMove={(state) => {
-              if (state.activeTooltipIndex !== undefined) {
+              if (state && state.activeTooltipIndex !== undefined) {
                 setHoverIndex(state.activeTooltipIndex);
               } else {
                 setHoverIndex(null);
@@ -542,11 +550,11 @@ function Analytics() {
               formatter={(value) => <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 ml-1">{value}</span>}
             />
             <Bar dataKey="clicks" name="Cliques Registrados" radius={[6, 6, 0, 0]}>
-              {data.map((entry, index) => {
+              {(Array.isArray(data) ? data : []).map((entry, index) => {
                 const isToday = index === new Date().getDay();
                 const isHovered = hoverIndex === index;
                 return (
-                  <Cell 
+                   <Cell 
                     key={`cell-${index}`} 
                     fill={isToday ? '#00FF88' : '#007BFF'} 
                     fillOpacity={isHovered ? 1 : 0.7}
@@ -563,11 +571,11 @@ function Analytics() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
          <div className="glass-panel p-8 rounded-3xl">
             <div className="text-xs font-black uppercase text-white/20 mb-2">Total na Semana</div>
-            <div className="text-4xl font-black text-brand-neon">{data.reduce((acc, curr) => acc + curr.clicks, 0)}</div>
+            <div className="text-4xl font-black text-brand-neon">{totalClicksThisWeek}</div>
          </div>
          <div className="glass-panel p-8 rounded-3xl">
             <div className="text-xs font-black uppercase text-white/20 mb-2">Média Diária</div>
-            <div className="text-4xl font-black text-white">{(data.reduce((acc, curr) => acc + curr.clicks, 0) / 7).toFixed(1)}</div>
+            <div className="text-4xl font-black text-white">{dailyAverage.toFixed(1)}</div>
          </div>
       </div>
     </div>
