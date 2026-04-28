@@ -344,8 +344,11 @@ async function startServer() {
     }
   });
 
+
+
+
   // Auth: Verify 2FA
-  api.post('/auth/verify-2fa', async (req, res) => {
+  app.post('/api/auth/verify-2fa', async (req, res) => {
     const { userId, code } = req.body;
     let user;
     if (supabase) {
@@ -370,7 +373,7 @@ async function startServer() {
   });
 
   // Auth: Forgot Password
-  api.post('/auth/forgot-password', async (req, res) => {
+  app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     console.log(`Solicitação de recuperação de senha para: ${email}`);
     
@@ -396,16 +399,24 @@ async function startServer() {
       db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?').run(resetToken, expiry, user.id);
     }
 
-    // Link de recuperação simulado para console
+    // No ambiente real, enviaríamos o e-mail aqui.
+    // Como estamos em um ambiente de desenvolvimento sem provedor SMTP configurado, logamos o link no console.
     const resetLink = `${req.headers.origin}/admin/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
     
-    console.log(`Link de recuperação para ${email}: ${resetLink}`);
+    console.log(`
+      --- E-MAIL DE RECUPERAÇÃO ENVIADO PARA: ${email} ---
+      Olá, ${user.username}!
+      Você solicitou a recuperação de sua senha no sistema InfraLink Eventos.
+      Para redefinir sua senha, clique no link abaixo (válido por 1 hora):
+      ${resetLink}
+      ---------------------------------------------------
+    `);
 
     res.json({ success: true, message: 'Instruções de recuperação enviadas para o e-mail.' });
   });
 
   // Auth: Reset Password
-  api.post('/auth/reset-password', async (req, res) => {
+  app.post('/api/auth/reset-password', async (req, res) => {
     const { email, token, newPassword } = req.body;
     
     let user;
@@ -432,7 +443,7 @@ async function startServer() {
   });
 
   // Auth: Setup 2FA
-  api.get('/auth/setup-2fa', authenticate, async (req, res) => {
+  app.get('/api/auth/setup-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     let user;
     if (supabase) {
@@ -458,7 +469,7 @@ async function startServer() {
     res.json({ qrCode, secret });
   });
 
-  api.post('/auth/enable-2fa', authenticate, async (req, res) => {
+  app.post('/api/auth/enable-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     const { code } = req.body;
     
@@ -485,7 +496,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.post('/auth/disable-2fa', authenticate, async (req, res) => {
+  app.post('/api/auth/disable-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     if (supabase) {
       await supabase.from('users').update({ two_factor_enabled: 0, two_factor_secret: null }).eq('id', userId);
@@ -495,7 +506,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.get('/auth/me', authenticate, async (req, res) => {
+  app.get('/api/auth/me', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     let user;
     if (supabase) {
@@ -520,7 +531,7 @@ async function startServer() {
   }
 
   // Content API
-  api.get('/content', async (req, res) => {
+  app.get('/api/content', async (req, res) => {
     let content;
     if (supabase) {
       const { data, error } = await supabase.from('page_content').select('*');
@@ -540,7 +551,7 @@ async function startServer() {
     res.json(formatted);
   });
 
-  api.post('/admin/content', authenticate, async (req, res) => {
+  app.post('/api/admin/content', authenticate, async (req, res) => {
     const { section, key, value } = req.body;
     if (supabase) {
       const { error } = await supabase
@@ -553,7 +564,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.post('/admin/content/batch', authenticate, async (req, res) => {
+  app.post('/api/admin/content/batch', authenticate, async (req, res) => {
     const { updates } = req.body;
     if (!Array.isArray(updates)) return res.status(400).json({ message: 'Updates must be an array' });
     
@@ -572,7 +583,7 @@ async function startServer() {
   });
 
   // Plans API
-  api.get('/plans', async (req, res) => {
+  app.get('/api/plans', async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
       if (error) return res.status(500).json({ message: error.message });
@@ -583,7 +594,7 @@ async function startServer() {
     }
   });
 
-  api.post('/plans/:id/click', async (req, res) => {
+  app.post('/api/plans/:id/click', async (req, res) => {
     try {
       const { id } = req.params;
       const dayOfWeek = new Date().getDay();
@@ -599,7 +610,7 @@ async function startServer() {
     }
   });
 
-  api.get('/admin/stats/plan-clicks', authenticate, async (req, res) => {
+  app.get('/api/admin/stats/plan-clicks', authenticate, async (req, res) => {
     const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     let stats;
     
@@ -613,6 +624,7 @@ async function startServer() {
       
       if (error) return res.status(500).json({ message: error.message });
       
+      // Group by day of week manually for Supabase result
       const counts: any = {};
       data.forEach((row: any) => {
         counts[row.day_of_week] = (counts[row.day_of_week] || 0) + 1;
@@ -638,7 +650,7 @@ async function startServer() {
   });
 
   // Services API
-  api.get('/services', async (req, res) => {
+  app.get('/api/services', async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.from('services').select('*').order('order_index', { ascending: true });
       if (error) return res.status(500).json({ message: error.message });
@@ -649,7 +661,7 @@ async function startServer() {
     }
   });
 
-  api.post('/admin/services', authenticate, async (req, res) => {
+  app.post('/api/admin/services', authenticate, async (req, res) => {
     const { title, description, icon, order_index } = req.body;
     if (supabase) {
       const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
@@ -660,7 +672,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.put('/admin/services/:id', authenticate, async (req, res) => {
+  app.put('/api/admin/services/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { title, description, icon, order_index } = req.body;
     if (supabase) {
@@ -672,7 +684,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.delete('/admin/services/:id', authenticate, async (req, res) => {
+  app.delete('/api/admin/services/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
       const { error } = await supabase.from('services').delete().eq('id', id);
@@ -683,7 +695,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.post('/admin/plans', authenticate, async (req, res) => {
+  app.post('/api/admin/plans', authenticate, async (req, res) => {
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
     if (supabase) {
       const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
@@ -694,7 +706,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.put('/admin/plans/:id', authenticate, async (req, res) => {
+  app.put('/api/admin/plans/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
     if (supabase) {
@@ -706,7 +718,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.delete('/admin/plans/:id', authenticate, async (req, res) => {
+  app.delete('/api/admin/plans/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
       const { error } = await supabase.from('plans').delete().eq('id', id);
@@ -718,7 +730,7 @@ async function startServer() {
   });
 
   // Customers API
-  api.get('/admin/customers', authenticate, async (req, res) => {
+  app.get('/api/admin/customers', authenticate, async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
       if (error) return res.status(500).json({ message: error.message });
@@ -729,7 +741,7 @@ async function startServer() {
     }
   });
 
-  api.post('/admin/customers', authenticate, async (req, res) => {
+  app.post('/api/admin/customers', authenticate, async (req, res) => {
     const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
     if (supabase) {
       const { error } = await supabase.from('customers').insert({ name, location, event_date, budget, cost: cost || 0, status: status || 'Pendente', start_date, end_date, phone, email, plan_id });
@@ -740,7 +752,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.put('/admin/customers/:id', authenticate, async (req, res) => {
+  app.put('/api/admin/customers/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
     if (supabase) {
@@ -752,7 +764,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.delete('/admin/customers/:id', authenticate, async (req, res) => {
+  app.delete('/api/admin/customers/:id', authenticate, async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ message: 'ID inválido' });
 
@@ -766,7 +778,7 @@ async function startServer() {
   });
 
   // --- Inventory API ---
-  api.get('/admin/inventory', authenticate, async (req, res) => {
+  app.get('/api/admin/inventory', authenticate, async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
       if (error) return res.status(500).json({ message: error.message });
@@ -777,7 +789,7 @@ async function startServer() {
     }
   });
 
-  api.post('/admin/inventory', authenticate, async (req, res) => {
+  app.post('/api/admin/inventory', authenticate, async (req, res) => {
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
     if (supabase) {
       const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status: status || 'Ativo' });
@@ -788,7 +800,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.put('/admin/inventory/:id', authenticate, async (req, res) => {
+  app.put('/api/admin/inventory/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
     if (supabase) {
@@ -800,7 +812,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  api.delete('/admin/inventory/:id', authenticate, async (req, res) => {
+  app.delete('/api/admin/inventory/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
       const { error } = await supabase.from('inventory').delete().eq('id', id);
@@ -816,12 +828,8 @@ async function startServer() {
 
   // --- API Fallback ---
   app.all('/api/*', (req, res) => {
-    console.log(`404 API Not Found: ${req.method} ${req.originalUrl}`);
-    res.status(404).json({ 
-      error: 'Not Found',
-      message: `A rota ${req.method} ${req.originalUrl} não existe no backend.`,
-      tip: 'Verifique se o caminho da API está correto.'
-    });
+    console.log(`404 API Not Found: ${req.method} ${req.url}`);
+    res.status(404).json({ message: `Route ${req.method} ${req.url} not found` });
   });
 
   // --- Vite / Frontend Serving ---
