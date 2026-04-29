@@ -580,36 +580,11 @@ async function startServer() {
   console.log('Configuring API routes...');
   app.use('/api', api);
 
-  api.get('/status', (req, res) => res.json({ status: 'api-online', supabase: !!supabase }));
+  api.get('/status', (req, res) => res.json({ status: 'api-online', supabase: !!supabase, time: new Date().toISOString() }));
   api.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
-  // Legacy/Shortcut login route
-  api.post('/login', (req, res, next) => {
-    console.log('API: Routing /login to /auth/login handler');
-    // Using a simple redirect for now, or better yet, just point to the same handler if I can
-    // For now, I'll just tell them to use /auth/login or duplicate the logic
-    res.redirect(307, '/api/auth/login');
-  });
-
-  api.get('/qrcode', async (req, res) => {
-    const { text } = req.query;
-    console.log(`QR Code requested for: ${text}`);
-    if (!text) return res.status(400).send('Text is required');
-    try {
-      const url = await QRCode.toDataURL(String(text), {
-        color: { dark: '#00FF88', light: '#FFFFFF' },
-        width: 400,
-        margin: 2
-      });
-      res.json({ url });
-    } catch (err) {
-      console.error('QR Generation Error:', err);
-      res.status(500).send('Failed to generate QR code');
-    }
-  });
-
-  api.post('/auth/login', async (req, res) => {
-    console.log('API: Login attempt', req.body.username);
+  // Shortcut login route for backward compatibility
+  const handleLoginRequest = async (req: express.Request, res: express.Response) => {
     try {
       const { username, password } = req.body;
       if (!username || !password) {
@@ -655,8 +630,30 @@ async function startServer() {
 
       res.json({ requires2FA: true, userId: user.id });
     } catch (error: any) {
-      console.error('API Error: /auth/login', error);
+      console.error('API Error: Login handler', error);
       res.status(500).json({ message: `Erro interno: ${error.message}` });
+    }
+  };
+
+  api.post('/auth/login', handleLoginRequest);
+
+  // Shortcut login route for backward compatibility
+  api.post('/login', handleLoginRequest);
+
+  api.get('/qrcode', async (req, res) => {
+    const { text } = req.query;
+    console.log(`QR Code requested for: ${text}`);
+    if (!text) return res.status(400).send('Text is required');
+    try {
+      const url = await QRCode.toDataURL(String(text), {
+        color: { dark: '#00FF88', light: '#FFFFFF' },
+        width: 400,
+        margin: 2
+      });
+      res.json({ url });
+    } catch (err) {
+      console.error('QR Generation Error:', err);
+      res.status(500).send('Failed to generate QR code');
     }
   });
 
