@@ -163,12 +163,10 @@ async function initSupabase() {
         return null;
       }
       
-      // If the error is "relation does not exist", the key is likely VALID but the table is missing.
-      // In this case, we SHOULD still return the client so it can try to seed or use other tables,
-      // OR we just fallback to SQLite if the DB is not setup.
-      // Given the requirement, falling back to SQLite is safer.
-      console.log(`Supabase verification returned error (likely missing table): ${error.message}. Falling back to SQLite.`);
-      return null;
+      // If the error is "relation does not exist" or similar, the key is likely VALID but the table is missing.
+      // We return the client so the app stays in Supabase mode and can try to seed or report errors correctly.
+      console.log(`Supabase verification returned non-auth error (likely missing table): ${error.message} (Code: ${error.code}). Key is likely valid.`);
+      return client;
     }
     
     console.log(`Supabase connection verified successfully using ${keyType} key`);
