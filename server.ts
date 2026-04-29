@@ -11,6 +11,15 @@ import crypto from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
 import QRCode from 'qrcode';
 import nodemailer from 'nodemailer';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+console.log('=== SERVER STARTUP ===');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('PORT:', process.env.PORT || 3000);
+console.log('CWD:', process.cwd());
+console.log('======================');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -505,9 +514,6 @@ seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
   };
 
 async function startServer() {
-  // Initialize Supabase before anything else
-  supabase = await initSupabase();
-  
   const app = express();
   
   // 1. Logging Middleware - Filtered to reduce noise from Vite source files
@@ -561,20 +567,11 @@ async function startServer() {
 
   // Add a dedicated logger for API requests
   api.use((req, res, next) => {
-    console.log(`[API-REQ] ${req.method} ${req.url}`);
+    console.log(`[API-EXACT] ${req.method} ${req.url}`);
     next();
   });
 
-  // Diagnostic route
-  app.get('/api-ping', (req, res) => {
-    console.log('API-PING HIT');
-    res.json({ status: 'ok', time: new Date().toISOString() });
-  });
-
-  console.log('Configuring API routes...');
-  app.use('/api', api);
-
-  api.get('/ping', (req, res) => res.json({ message: 'pong' }));
+  api.get('/ping', (req, res) => res.json({ message: 'pong', timestamp: new Date().toISOString() }));
 
   api.get('/qrcode', async (req, res) => {
     const { text } = req.query;
@@ -1173,6 +1170,10 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // --- Register API Router ---
+  console.log('Registering /api router...');
+  app.use('/api', api);
+
   // --- API Fallback ---
   app.all('/api/*', (req, res) => {
     console.log(`404 API Not Found: ${req.method} ${req.url}`);
@@ -1200,16 +1201,22 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log('Routes registered and server is listening.');
     
-    // Run seeding AFTER server is listening to ensure startup is not blocked
-    try {
-      console.log('Starting seed process...');
-      await seedUsers();
-      await seedPlans();
-      await seedServices();
-      console.log('Seed process completed.');
-    } catch (err) {
-      console.error('Seeding failed during startup:', err);
-    }
+    // Initialize Supabase in the background
+    initSupabase().then(client => {
+      supabase = client;
+      console.log('Supabase background initialization finished.');
+      
+      // Run seeding in background after Supabase is ready
+      seedUsers();
+      seedPlans();
+      seedServices();
+    }).catch(err => {
+      console.error('Supabase background initialization failed:', err);
+      // Even if Supabase fails, we still seed SQLite
+      seedUsers();
+      seedPlans();
+      seedServices();
+    });
   });
 }
 
