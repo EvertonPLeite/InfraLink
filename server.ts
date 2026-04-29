@@ -619,18 +619,39 @@ async function startServer() {
 
   api.get('/qrcode', async (req, res) => {
     const { text } = req.query;
-    console.log(`QR Code requested for: ${text}`);
+    console.log(`[QR-GEN] Requested for: "${text}"`);
     if (!text) return res.status(400).send('Text is required');
+    
     try {
+      console.log(`[QR-GEN] Attempting to generate DataURL for: ${text}`);
       const url = await QRCode.toDataURL(String(text), {
         color: { dark: '#00FF88', light: '#FFFFFF' },
         width: 400,
         margin: 2
       });
+      console.log(`[QR-GEN] Success! URL length: ${url.length}`);
       res.json({ url });
-    } catch (err) {
-      console.error('QR Generation Error:', err);
-      res.status(500).send('Failed to generate QR code');
+    } catch (err: any) {
+      console.error('[QR-GEN] Error generating DataURL:', err.message);
+      
+      // Fallback: If DataURL/Canvas fails, try SVG string which usually works without canvas
+      try {
+        console.log('[QR-GEN] Attempting SVG fallback...');
+        const svg = await QRCode.toString(String(text), {
+          type: 'svg',
+          color: { dark: '#00FF88', light: '#FFFFFF' },
+          width: 400,
+          margin: 2
+        });
+        // Convert SVG to DataURL
+        const base64 = Buffer.from(svg).toString('base64');
+        const url = `data:image/svg+xml;base64,${base64}`;
+        console.log(`[QR-GEN] SVG Fallback Success! URL length: ${url.length}`);
+        res.json({ url });
+      } catch (fallbackErr: any) {
+        console.error('[QR-GEN] Fallback also failed:', fallbackErr.message);
+        res.status(500).send(`Failed to generate QR code: ${err.message}`);
+      }
     }
   });
 
