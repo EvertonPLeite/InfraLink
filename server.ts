@@ -78,9 +78,15 @@ let supabase: any = null;
 
 const isValidSupabaseConfig = (url: string | undefined, key: string | undefined) => {
   if (!url || !key || url.trim() === '' || key.trim() === '') return false;
+  if (key.includes('...') || key.includes('https://')) return false;
+  
+  // Supabase keys (anon and service_role) are JWTs, which usually start with 'eyJ'
+  // Some newer ones might differ, but they certainly aren't short strings or URLs
+  if (key.length < 40) return false;
+
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && url.includes('supabase.co');
   } catch (e) {
     return false;
   }
