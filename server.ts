@@ -560,10 +560,12 @@ const seedPageContent = async () => {
 async function startServer() {
   const app = express();
   
-  // 1. Logging Middleware - Filtered to reduce noise from Vite source files
+  // 1. Body Parsers (CRITICAL: MUST BE BEFORE ROUTES)
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // 2. Logging Middleware
   app.use((req, res, next) => {
-    // Only log API requests, navigation, or errors
-    // Ignore internal Vite requests and common source/asset files to reduce clutter
     const isViteRequest = req.url.startsWith('/@') || req.url.startsWith('/node_modules') || req.url.includes('?v=') || req.url.includes('?t=');
     const isSourceFile = req.url.match(/\.(tsx?|jsx?|css|html|json)$/);
     const isAsset = req.url.match(/\.(png|jpg|jpeg|gif|svg|woff2?|ttf|eot|ico)$/);
@@ -580,31 +582,18 @@ async function startServer() {
     next();
   });
 
-  // 2. Health & Diag - BEFORE anything else
+  // 3. Health & Diag
   app.get('/debug', (req, res) => {
     res.json({
       status: 'ok',
       env: process.env.NODE_ENV,
       cwd: process.cwd(),
-      time: new Date().toISOString()
+      time: new Date().toISOString(),
+      supabase: !!supabase
     });
   });
 
   app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
-  
-  app.get('/diag/routes', (req, res) => {
-    const routes = app._router.stack
-      .filter((r: any) => r.route)
-      .map((r: any) => ({
-        path: r.route.path,
-        methods: r.route.methods
-      }));
-    res.json(routes);
-  });
-
-  // 3. Body Parsers
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
 
   // 4. API Routes
   const api = express.Router();
@@ -619,41 +608,33 @@ async function startServer() {
 
   api.get('/qrcode', async (req, res) => {
     const { text } = req.query;
-    console.log(`[QR-GEN] Requested for: "${text}"`);
     if (!text) return res.status(400).send('Text is required');
-    
     try {
-      console.log(`[QR-GEN] Attempting to generate DataURL for: ${text}`);
       const url = await QRCode.toDataURL(String(text), {
         color: { dark: '#00FF88', light: '#FFFFFF' },
         width: 400,
         margin: 2
       });
-      console.log(`[QR-GEN] Success! URL length: ${url.length}`);
       res.json({ url });
     } catch (err: any) {
-      console.error('[QR-GEN] Error generating DataURL:', err.message);
-      
-      // Fallback: If DataURL/Canvas fails, try SVG string which usually works without canvas
       try {
-        console.log('[QR-GEN] Attempting SVG fallback...');
         const svg = await QRCode.toString(String(text), {
           type: 'svg',
           color: { dark: '#00FF88', light: '#FFFFFF' },
           width: 400,
           margin: 2
         });
-        // Convert SVG to DataURL
         const base64 = Buffer.from(svg).toString('base64');
         const url = `data:image/svg+xml;base64,${base64}`;
-        console.log(`[QR-GEN] SVG Fallback Success! URL length: ${url.length}`);
         res.json({ url });
       } catch (fallbackErr: any) {
-        console.error('[QR-GEN] Fallback also failed:', fallbackErr.message);
         res.status(500).send(`Failed to generate QR code: ${err.message}`);
       }
     }
   });
+
+  // Mount API router
+  app.use('/api', api);
 
   api.post('/auth/login', async (req, res) => {
     console.log('API: Login attempt', req.body.username);
@@ -1235,15 +1216,13 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // --- Register API Router ---
-  console.log('Registering /api router...');
-  app.use('/api', api);
-
   // --- API Fallback ---
   app.all('/api/*', (req, res) => {
     console.log(`404 API Not Found: ${req.method} ${req.url}`);
     res.status(404).json({ message: `Route ${req.method} ${req.url} not found` });
   });
+
+  // 1238 was here
 
   // --- Vite / Frontend Serving ---
   if (process.env.NODE_ENV !== 'production') {
