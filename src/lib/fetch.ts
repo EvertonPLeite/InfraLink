@@ -12,7 +12,12 @@ export async function safeFetch(url: string, options?: RequestInit) {
       return data;
     } else {
       const text = await res.text();
-      // If it's HTML, it's probably a 404 or 500 error page from the server
+      
+      if (!res.ok) {
+        throw new Error(text || `Erro ${res.status}: ${res.statusText}`);
+      }
+
+      // If it's HTML, it the server might have returned an error page
       if (text.trim().startsWith('<!doctype') || text.trim().startsWith('<html')) {
         throw new Error(`Erro no servidor (Resposta HTML). Status: ${res.status}. Verifique se a rota ${url} existe.`);
       }

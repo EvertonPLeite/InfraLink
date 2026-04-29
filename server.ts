@@ -1004,26 +1004,36 @@ async function startServer() {
   });
 
   api.post('/admin/services', authenticate, async (req, res) => {
-    const { title, description, icon, order_index } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
+    try {
+      const { title, description, icon, order_index } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error creating service:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.put('/admin/services/:id', authenticate, async (req, res) => {
-    const { id } = req.params;
-    const { title, description, icon, order_index } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
+    try {
+      const { id } = req.params;
+      const { title, description, icon, order_index } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id);
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error updating service:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.delete('/admin/services/:id', authenticate, async (req, res) => {
@@ -1038,26 +1048,36 @@ async function startServer() {
   });
 
   api.post('/admin/plans', authenticate, async (req, res) => {
-    const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
+    try {
+      const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error creating plan:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.put('/admin/plans/:id', authenticate, async (req, res) => {
-    const { id } = req.params;
-    const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('plans').update({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index, budget_text }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
+    try {
+      const { id } = req.params;
+      const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('plans').update({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index, budget_text }).eq('id', id);
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error updating plan:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.delete('/admin/plans/:id', authenticate, async (req, res) => {
@@ -1088,30 +1108,40 @@ async function startServer() {
   });
 
   api.post('/admin/customers', authenticate, async (req, res) => {
-    const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
-    console.log(`[CUSTOMER] Creating new customer: ${name} (${email})`);
-    if (supabase) {
-      const { error } = await supabase.from('customers').insert({ name, location, event_date, budget, cost: cost || 0, status: status || 'Pendente', start_date, end_date, phone, email, plan_id });
-      if (error) {
-        console.error('[CUSTOMER] Supabase insert error:', error.message, error.details, error.hint);
-        return res.status(500).json({ message: error.message });
+    try {
+      const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+      console.log(`[CUSTOMER] Creating new customer: ${name} (${email})`);
+      if (supabase) {
+        const { error } = await supabase.from('customers').insert({ name, location, event_date, budget, cost: cost || 0, status: status || 'Pendente', start_date, end_date, phone, email, plan_id });
+        if (error) {
+          console.error('[CUSTOMER] Supabase insert error:', error.message, error.details, error.hint);
+          return res.status(500).json({ message: error.message });
+        }
+      } else {
+        db.prepare('INSERT INTO customers (name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, location, event_date, budget, cost || 0, status || 'Pendente', start_date, end_date, phone, email, plan_id);
       }
-    } else {
-      db.prepare('INSERT INTO customers (name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, location, event_date, budget, cost || 0, status || 'Pendente', start_date, end_date, phone, email, plan_id);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error creating customer:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.put('/admin/customers/:id', authenticate, async (req, res) => {
-    const { id } = req.params;
-    const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('customers').update({ name, location, event_date, budget, cost: cost || 0, status, start_date, end_date, phone, email, plan_id }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('UPDATE customers SET name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(name, location, event_date, budget, cost || 0, status, start_date, end_date, phone, email, plan_id, id);
+    try {
+      const { id } = req.params;
+      const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('customers').update({ name, location, event_date, budget, cost: cost || 0, status, start_date, end_date, phone, email, plan_id }).eq('id', id);
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('UPDATE customers SET name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(name, location, event_date, budget, cost || 0, status, start_date, end_date, phone, email, plan_id, id);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error updating customer:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.delete('/admin/customers/:id', authenticate, async (req, res) => {
@@ -1140,26 +1170,36 @@ async function startServer() {
   });
 
   api.post('/admin/inventory', authenticate, async (req, res) => {
-    const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status: status || 'Ativo' });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, price || 0, status || 'Ativo');
+    try {
+      const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status: status || 'Ativo' });
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, price || 0, status || 'Ativo');
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error creating inventory item:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.put('/admin/inventory/:id', authenticate, async (req, res) => {
-    const { id } = req.params;
-    const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
-    if (supabase) {
-      const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      db.prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, price || 0, status, id);
+    try {
+      const { id } = req.params;
+      const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
+      if (supabase) {
+        const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status }).eq('id', id);
+        if (error) return res.status(500).json({ message: error.message });
+      } else {
+        db.prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, price || 0, status, id);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error updating inventory item:', err);
+      res.status(500).json({ message: err.message });
     }
-    res.json({ success: true });
   });
 
   api.delete('/admin/inventory/:id', authenticate, async (req, res) => {
