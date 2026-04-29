@@ -609,33 +609,35 @@ async function startServer() {
   api.get('/qrcode', async (req, res) => {
     const { text } = req.query;
     if (!text) return res.status(400).send('Text is required');
+    
     try {
-      const url = await QRCode.toDataURL(String(text), {
+      // Use SVG by default as it's more reliable in server environments (doesn't require canvas)
+      const svg = await QRCode.toString(String(text), {
+        type: 'svg',
         color: { dark: '#00FF88', light: '#FFFFFF' },
         width: 400,
         margin: 2
       });
+      const base64 = Buffer.from(svg).toString('base64');
+      const url = `data:image/svg+xml;base64,${base64}`;
       res.json({ url });
     } catch (err: any) {
+      console.error('[QR-GEN] SVG generation failed, trying DataURL:', err.message);
       try {
-        const svg = await QRCode.toString(String(text), {
-          type: 'svg',
+        const url = await QRCode.toDataURL(String(text), {
           color: { dark: '#00FF88', light: '#FFFFFF' },
           width: 400,
           margin: 2
         });
-        const base64 = Buffer.from(svg).toString('base64');
-        const url = `data:image/svg+xml;base64,${base64}`;
         res.json({ url });
       } catch (fallbackErr: any) {
+        console.error('[QR-GEN] All generation methods failed:', fallbackErr.message);
         res.status(500).send(`Failed to generate QR code: ${err.message}`);
       }
     }
   });
 
-  // Mount API router
-  app.use('/api', api);
-
+  // Auth routes on API router
   api.post('/auth/login', async (req, res) => {
     console.log('API: Login attempt', req.body.username);
     try {
@@ -681,7 +683,6 @@ async function startServer() {
     }
   });
 
-  // Auth routes moved to API router for consistency
   api.post('/auth/verify-2fa', async (req, res) => {
     const { userId, code } = req.body;
     let user;
@@ -1217,8 +1218,18 @@ async function startServer() {
   });
 
   // --- API Fallback ---
+  api.all('/*', (req, res) => {
+    console.log(`[API-404] Not Found: ${req.method} ${req.url}`);
+    res.status(404).json({ message: `Route ${req.method} ${req.url} not found on API router` });
+  });
+
+  // Mount API router
+  console.log('Mounting /api router...');
+  app.use('/api', api);
+
+  // --- Global API Fallback (Catch-all for /api that missed the router) ---
   app.all('/api/*', (req, res) => {
-    console.log(`404 API Not Found: ${req.method} ${req.url}`);
+    console.log(`[GLOBAL-404] API Not Found: ${req.method} ${req.url}`);
     res.status(404).json({ message: `Route ${req.method} ${req.url} not found` });
   });
 
