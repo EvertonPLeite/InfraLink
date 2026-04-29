@@ -5,17 +5,11 @@ import dotenv from 'dotenv';
 // Load env vars
 dotenv.config();
 
-const getEnv = (key: string) => {
-  const val = process.env[key];
-  return val && val.trim() !== '' && !val.includes('...') ? val.trim() : undefined;
-};
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL') || getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
-const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY') || getEnv('SUPABASE_SECRET_KEY') || getEnv('SUPABASE_SERVICE_KEY') || getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || SUPABASE_SERVICE_ROLE_KEY.length < 40 || SUPABASE_SERVICE_ROLE_KEY.includes('https')) {
-  console.error('SUPABASE_URL and a VALID secret key (SERVICE_ROLE_KEY) must be set.');
-  console.log('Ensure you are not using a URL as your API Key.');
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env');
   process.exit(1);
 }
 

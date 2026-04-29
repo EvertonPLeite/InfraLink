@@ -245,13 +245,9 @@ function ManageCustomers() {
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData);
     
-    // Clean and type data
-    const payload = {
-      ...data,
-      budget: parseFloat(data.budget.toString().replace(',', '.')) || 0,
-      cost: parseFloat(data.cost.toString().replace(',', '.')) || 0,
-      plan_id: data.plan_id ? parseInt(data.plan_id as string) : null
-    };
+    // Ensure numbers
+    data.budget = data.budget.toString().replace(',', '.');
+    data.cost = data.cost.toString().replace(',', '.');
 
     const method = editingCustomer?.id ? 'PUT' : 'POST';
     const url = editingCustomer?.id ? `/api/admin/customers/${editingCustomer.id}` : '/api/admin/customers';
@@ -263,7 +259,7 @@ function ManageCustomers() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(data)
       });
 
       setEditingCustomer(null);
@@ -937,14 +933,11 @@ function ManagePlans() {
     const data: any = Object.fromEntries(formData);
     
     // Format numeric and boolean fields
-    const payload = {
-      ...data,
-      is_featured: form.is_featured.checked ? 1 : 0,
-      order_index: parseInt(data.order_index) || 0,
-    };
+    data.is_featured = form.is_featured.checked ? 1 : 0;
+    data.order_index = parseInt(data.order_index) || 0;
     
     // Map highlight_color_text back to highlight_color if it was used
-    if (data.highlight_color_text) payload.highlight_color = data.highlight_color_text;
+    if (data.highlight_color_text) data.highlight_color = data.highlight_color_text;
 
     const method = editingPlan?.id ? 'PUT' : 'POST';
     const url = editingPlan?.id ? `/api/admin/plans/${editingPlan.id}` : '/api/admin/plans';
@@ -956,7 +949,7 @@ function ManagePlans() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(data)
       });
 
       setEditingPlan(null);
@@ -1597,10 +1590,7 @@ function ManageInventory() {
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData);
     
-    const payload = {
-      ...data,
-      price: parseFloat(data.price.toString().replace(',', '.')) || 0
-    };
+    data.price = data.price.toString().replace(',', '.');
 
     const method = editingItem?.id ? 'PUT' : 'POST';
     const url = editingItem?.id ? `/api/admin/inventory/${editingItem.id}` : '/api/admin/inventory';
@@ -1612,7 +1602,7 @@ function ManageInventory() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(data)
       });
 
       setEditingItem(null);

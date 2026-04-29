@@ -12,17 +12,9 @@ export async function safeFetch(url: string, options?: RequestInit) {
       return data;
     } else {
       const text = await res.text();
-      
-      if (!res.ok) {
-        throw new Error(text || `Erro ${res.status}: ${res.statusText}`);
-      }
-
-      // If it's HTML, the server might have returned an error page
-      if (text.trim().toLowerCase().startsWith('<!doctype') || text.trim().toLowerCase().startsWith('<html')) {
-        // Strip tags for a cleaner error message if it's very short, otherwise show generic message
-        const stripped = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
-        const shortError = stripped.length < 150 ? stripped : 'O servidor retornou uma página de erro (HTML). Verifique se a API está configurada corretamente.';
-        throw new Error(`${shortError} (Status: ${res.status})`);
+      // If it's HTML, it's probably a 404 or 500 error page from the server
+      if (text.trim().startsWith('<!doctype') || text.trim().startsWith('<html')) {
+        throw new Error(`Erro no servidor (Resposta HTML). Status: ${res.status}. Verifique se a rota ${url} existe.`);
       }
       return text;
     }
