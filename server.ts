@@ -25,8 +25,8 @@ const getEnv = (key: string) => {
   return val && val.trim() !== '' && !val.includes('...') ? val.trim() : undefined;
 };
 
-const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL') || getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
-const SUPABASE_KEY = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY') || getEnv('SUPABASE_PUBLISHABLE_KEY') || getEnv('VITE_SUPABASE_ANON_KEY');
+const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL') || getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL') || 'https://fuenqltwbanvyzeqkyvc.supabase.co';
+const SUPABASE_KEY = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY') || getEnv('SUPABASE_PUBLISHABLE_KEY') || getEnv('VITE_SUPABASE_ANON_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1ZW5xbHR3YmFudnl6ZXFreXZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MDg4ODcsImV4cCI6MjA5Mjk4NDg4N30.8sKb_4N_FQM4VAsXLiaGmfQZOHKFyaYytbh5gdNtgWU';
 const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY') || getEnv('SUPABASE_SECRET_KEY') || getEnv('SUPABASE_SERVICE_KEY');
 
 console.log('--- SUPABASE ENVIRONMENT CHECK ---');
