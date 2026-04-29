@@ -192,19 +192,23 @@ function ManageCustomers() {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
       .then(data => {
-        setCustomers(data);
+        setCustomers(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(err => {
         console.error('Error fetching customers:', err);
+        setCustomers([]);
         setLoading(false);
       });
   };
 
   const fetchPlans = () => {
     safeFetch('/api/plans')
-      .then(data => setPlans(data))
-      .catch(err => console.error('Error fetching plans:', err));
+      .then(data => setPlans(Array.isArray(data) ? data : []))
+      .catch(err => {
+        console.error('Error fetching plans:', err);
+        setPlans([]);
+      });
   };
 
   useEffect(() => {
@@ -336,7 +340,7 @@ function ManageCustomers() {
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Plano Contratado</label>
                   <select name="plan_id" defaultValue={editingCustomer.plan_id || ''} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon appearance-none outline-none">
                     <option value="">Nenhum / Personalizado</option>
-                    {plans.map(p => (
+                    {Array.isArray(plans) && plans.map(p => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
@@ -374,14 +378,14 @@ function ManageCustomers() {
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
-        {customers.length === 0 ? (
+        {!Array.isArray(customers) || customers.length === 0 ? (
           <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
              <Users size={48} className="mx-auto text-white/10 mb-4" />
              <p className="text-white/40 font-medium">Nenhum cliente cadastrado ainda.</p>
           </div>
         ) : (
           customers.map(customer => {
-            const chosenPlan = plans.find(p => p.id === customer.plan_id);
+            const chosenPlan = Array.isArray(plans) ? plans.find(p => p.id === customer.plan_id) : null;
             return (
               <div key={customer.id} className="glass-panel p-8 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:border-white/20 transition-all">
                 <div className="flex-grow">
@@ -634,7 +638,7 @@ function EditContent() {
     setContent((prev: any) => ({
       ...prev,
       [section]: {
-        ...prev[section],
+        ...(prev[section] || {}),
         [key]: value
       }
     }));
@@ -644,7 +648,7 @@ function EditContent() {
     setSaving(true);
     setSuccessSection(null);
     
-    const updates = Object.entries(content[section]).map(([key, value]) => ({
+    const updates = Object.entries(content[section] || {}).map(([key, value]) => ({
       section,
       key,
       value: value as string
@@ -891,11 +895,12 @@ function ManagePlans() {
     setLoading(true);
     safeFetch(`/api/plans?t=${Date.now()}`)
       .then(data => {
-        setPlans(data);
+        setPlans(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(err => {
         console.error('Error loading plans:', err);
+        setPlans([]);
         setLoading(false);
       });
   };
@@ -1082,13 +1087,13 @@ function ManagePlans() {
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
-        {plans.length === 0 && !loading ? (
+        {!Array.isArray(plans) || plans.length === 0 && !loading ? (
           <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
              <Package size={48} className="mx-auto text-white/10 mb-4" />
              <p className="text-white/40 font-medium">Nenhum plano cadastrado ainda.</p>
           </div>
         ) : (
-          plans.map(plan => (
+          Array.isArray(plans) && plans.map(plan => (
             <div key={plan.id} className="glass-panel p-8 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:border-white/20 transition-all" style={plan.is_featured ? { borderLeft: `4px solid ${plan.highlight_color}` } : {}}>
               <div className="flex items-center gap-6">
                  <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center transition-colors" style={{ color: plan.highlight_color }}>
@@ -1344,11 +1349,12 @@ function ManageServices() {
   const fetchServices = () => {
     safeFetch('/api/services')
       .then(data => {
-        setServices(data);
+        setServices(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(err => {
         console.error('Error fetching services:', err);
+        setServices([]);
         setLoading(false);
       });
   };
@@ -1475,7 +1481,13 @@ function ManageServices() {
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
-        {services.map(service => {
+        {!Array.isArray(services) || services.length === 0 ? (
+          <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
+             <Wifi size={48} className="mx-auto text-white/10 mb-4" />
+             <p className="text-white/40 font-medium">Nenhum serviço cadastrado ainda.</p>
+          </div>
+        ) : (
+          services.map(service => {
           const IconComp = iconOptions.find(o => o.name === (service.icon || 'Wifi'))?.icon || Wifi;
           return (
             <div key={service.id} className="glass-panel p-8 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:border-white/20 transition-all">
@@ -1527,7 +1539,7 @@ function ManageServices() {
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
     </div>
   );
@@ -1544,11 +1556,12 @@ function ManageInventory() {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
       .then(data => {
-        setItems(data);
+        setItems(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(err => {
         console.error('Error fetching inventory:', err);
+        setItems([]);
         setLoading(false);
       });
   };
@@ -1674,7 +1687,7 @@ function ManageInventory() {
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
-        {items.length === 0 ? (
+        {!Array.isArray(items) || items.length === 0 ? (
           <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
              <Package size={48} className="mx-auto text-white/10 mb-4" />
              <p className="text-white/40 font-medium">Nenhum equipamento cadastrado ainda.</p>
