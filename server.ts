@@ -112,7 +112,7 @@ async function initSupabase() {
       auth: { persistSession: false }
     });
 
-    console.log(`Verifying Supabase connection using ${keyType} key...`);
+    console.log(`Verifying Supabase connection using ${keyType} key (Prefix: ${keyToUse!.substring(0, 8)}...)...`);
     
     // We try to fetch from 'plans' to verify the key. 
     // If the key is invalid, Supabase returns a 401/403.
@@ -345,7 +345,7 @@ try {
 
 // Seed Initial Data
 const seedUsers = async () => {
-  const users = ['admin', 'infralinkeventos@gmail.com'];
+  const users = ['admin', 'infralinkeventos@gmail.com', 'epl2_22@hotmail.com'];
   const password = 'admin123';
   const hash = bcrypt.hashSync(password, 10);
 
@@ -580,7 +580,16 @@ async function startServer() {
   console.log('Configuring API routes...');
   app.use('/api', api);
 
+  api.get('/status', (req, res) => res.json({ status: 'api-online', supabase: !!supabase }));
   api.get('/ping', (req, res) => res.json({ message: 'pong' }));
+
+  // Legacy/Shortcut login route
+  api.post('/login', (req, res, next) => {
+    console.log('API: Routing /login to /auth/login handler');
+    // Using a simple redirect for now, or better yet, just point to the same handler if I can
+    // For now, I'll just tell them to use /auth/login or duplicate the logic
+    res.redirect(307, '/api/auth/login');
+  });
 
   api.get('/qrcode', async (req, res) => {
     const { text } = req.query;
@@ -627,7 +636,14 @@ async function startServer() {
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
 
-      if (!bcrypt.compareSync(password, user.password_hash)) {
+      // Check password (handle both password and password_hash fields)
+      const storedPash = user.password_hash || user.password;
+      const isValid = storedPash && (
+        bcrypt.compareSync(password, storedPash) || 
+        password === storedPash // Fallback for plain text if any
+      );
+
+      if (!isValid) {
         console.log(`Login failed: invalid password for ${username}`);
         return res.status(401).json({ message: 'Credenciais inválidas' });
       }
@@ -1244,6 +1260,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Initial Login: Use 'admin' or 'epl2_22@hotmail.com' with password 'admin123'`);
     console.log('Routes registered and server is listening.');
     
     // Run seeding AFTER server is listening to ensure startup is not blocked
@@ -1257,9 +1274,9 @@ async function startServer() {
       console.error('Seeding failed during startup:', err);
     }
   });
+  return app;
 }
 
-startServer().catch(err => {
+export const serverApp = startServer().catch(err => {
   console.error('FATAL: Failed to start server:', err);
-  process.exit(1);
 });
