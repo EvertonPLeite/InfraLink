@@ -86,11 +86,22 @@ async function sendEmail({ to, subject, html }: { to: string, subject: string, h
 let supabase: any = null;
 
 const isValidSupabaseConfig = (url: string | undefined, key: string | undefined) => {
-  if (!url || !key || url.trim() === '' || key.trim() === '') return false;
+  if (!url || !key || url.trim() === '' || key.trim() === '') {
+    if (url || key) console.log('Supabase config partially defined but has empty values.');
+    return false;
+  }
+  
+  if (key.includes('...') || key.length < 20) {
+    console.log(`Supabase key seems invalid (length: ${key.length}, contains dots: ${key.includes('...')})`);
+    return false;
+  }
+
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    return true;
   } catch (e) {
+    console.log(`Supabase URL is invalid: ${url}`);
     return false;
   }
 };
@@ -116,22 +127,38 @@ async function initSupabase() {
     });
 
     console.log(`Verifying Supabase connection using ${keyType} key...`);
+    console.log(`Verifying Supabase connection for URL: ${SUPABASE_URL}`);
+    console.log(`- Key source: ${keyType === 'service_role' ? 'SUPABASE_SERVICE_ROLE_KEY' : 'SUPABASE_KEY'}`);
+    console.log(`- Key length: ${keyToUse!.length}`);
+    console.log(`- Key prefix: ${keyToUse!.substring(0, 5)}...`);
     
     // We try to fetch from 'plans' to verify the key. 
     // If the key is invalid, Supabase returns a 401/403.
     const { error } = await client.from('plans').select('id').limit(1);
     
     if (error) {
-      // If error is "Invalid API key", we definitely want to fall back.
-      if (error.message.includes('Invalid API key') || error.code === 'PGRST301' || error.message.includes('JWT')) {
-        console.error(`Supabase verification failed with terminal error: ${error.message}`);
+      const isKeyError = error.message.includes('Invalid API key') || error.code === 'PGRST301' || error.message.includes('JWT') || error.message.includes('apiKey');
+      if (isKeyError) {
+        console.error('***************************************************');
+        console.error(`SUPABASE ERROR: ${error.message}`);
+        console.error(`Attempted with ${keyType} key on URL: ${SUPABASE_URL}`);
+        console.error('Please check your environment variables in Settings:');
+        console.error('- NEXT_PUBLIC_SUPABASE_URL');
+        console.error('- NEXT_PUBLIC_SUPABASE_ANON_KEY (starts with eyJ...)');
+        console.error('- SUPABASE_SERVICE_ROLE_KEY (optional, starts with eyJ...)');
+        console.error('***************************************************');
         
         // If we tried service_role and it failed, try anon as last resort for verification
         if (keyType === 'service_role') {
           console.log('Retrying verification with anon key...');
           const anonClient = createClient(SUPABASE_URL!, SUPABASE_KEY!, { auth: { persistSession: false } });
           const { error: anonError } = await anonClient.from('plans').select('id').limit(1);
-          if (!anonError) return anonClient;
+          if (!anonError) {
+            console.log('Verification succeeded with anon key but failed with service_role.');
+            return anonClient;
+          } else {
+            console.error(`Verification also failed with anon key: ${anonError.message}`);
+          }
         }
         return null;
       }
@@ -362,17 +389,21 @@ const seedUsers = async () => {
 
     // Supabase
     if (supabase) {
-      const { data, error } = await supabase.from('users').select('id').eq('username', username).maybeSingle();
-      if (!error && !data) {
-        console.log(`Seeding user ${username} into Supabase...`);
-        const { error: insertError } = await supabase.from('users').insert({ username, password_hash: hash });
-        if (insertError) console.error(`Error seeding user ${username} to Supabase:`, insertError.message, insertError.code, insertError.hint);
+      try {
+        const { data, error } = await supabase.from('users').select('id').eq('username', username).maybeSingle();
+        if (!error && !data) {
+          console.log(`Seeding user ${username} into Supabase...`);
+          const { error: insertError } = await supabase.from('users').insert({ username, password_hash: hash });
+          if (insertError) console.error(`Error seeding user ${username} to Supabase:`, insertError.message);
+        }
+      } catch (err) {
+        console.error(`Supabase seed exception for user ${username}:`, err);
       }
     }
   }
 };
 
-const seedContent = [
+const seedContentData = [
   ['hero', 'title', 'Seu <span class="text-white/40">evento</span> não pode <span class="gradient-text">parar.</span>'],
   ['hero', 'subtitle', 'Infraestrutura profissional de conectividade para eventos'],
   ['hero', 'cta', 'Fale no WhatsApp'],
@@ -394,8 +425,23 @@ const seedContent = [
   ['footer', 'description', 'Sua infraestrutura de rede para eventos com segurança e estabilidade.']
 ];
 
-const insertContent = db.prepare('INSERT OR IGNORE INTO page_content (section, key, value) VALUES (?, ?, ?)');
-seedContent.forEach(c => insertContent.run(c[0], c[1], c[2]));
+const seedPageContent = async () => {
+  // SQLite
+  const insertContent = db.prepare('INSERT OR IGNORE INTO page_content (section, key, value) VALUES (?, ?, ?)');
+  seedContentData.forEach(c => insertContent.run(c[0], c[1], c[2]));
+
+  // Supabase
+  if (supabase) {
+    console.log('Syncing page_content to Supabase...');
+    try {
+      const updates = seedContentData.map(c => ({ section: c[0], key: c[1], value: c[2] }));
+      const { error } = await supabase.from('page_content').upsert(updates, { onConflict: 'section,key' });
+      if (error) console.error('Supabase page_content sync error:', error.message);
+    } catch (err) {
+      console.error('Supabase page_content sync exception:', err);
+    }
+  }
+};
 
   // Seed Initial Data
   const seedPlans = async () => {
@@ -1208,12 +1254,14 @@ async function startServer() {
       
       // Run seeding in background after Supabase is ready
       seedUsers();
+      seedPageContent();
       seedPlans();
       seedServices();
     }).catch(err => {
       console.error('Supabase background initialization failed:', err);
       // Even if Supabase fails, we still seed SQLite
       seedUsers();
+      seedPageContent();
       seedPlans();
       seedServices();
     });
