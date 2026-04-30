@@ -563,17 +563,17 @@ const seedPageContent = async () => {
     }
   };
 
+const app = express();
+const api = express.Router();
+
+// 1. Body Parsers (CRITICAL: MUST BE BEFORE ROUTES)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// 4. API Routes (MOUNTED EARLY to avoid conflicts)
+app.use('/api', api);
+
 async function startServer() {
-  const app = express();
-  
-  // 1. Body Parsers (CRITICAL: MUST BE BEFORE ROUTES)
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-
-  // 4. API Routes (MOUNTED EARLY to avoid conflicts)
-  const api = express.Router();
-  app.use('/api', api);
-
   // 2. Logging Middleware
   app.use((req, res, next) => {
     const isViteRequest = req.url.startsWith('/@') || req.url.startsWith('/node_modules') || req.url.includes('?v=') || req.url.includes('?t=');
@@ -593,7 +593,7 @@ async function startServer() {
   });
 
   // 3. Health & Diag
-  app.get('/debug', (req, res) => {
+  api.get('/debug', (req, res) => {
     res.json({
       status: 'ok',
       env: process.env.NODE_ENV,
@@ -603,7 +603,7 @@ async function startServer() {
     });
   });
 
-  app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+  api.get('/healthz', (req, res) => res.json({ status: 'ok' }));
 
   // 4. API Routes
   // (Router defined earlier)
@@ -1129,15 +1129,62 @@ async function startServer() {
   api.get('/admin/customers', authenticate, async (req, res) => {
     if (supabase) {
       console.log('[CUSTOMER] Fetching customers from Supabase');
+      // Use a safe select first to avoid schema cache issues with newly added columns
       const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
+      
       if (error) {
         console.error('[CUSTOMER] Supabase fetch error:', error.message);
+        
+        // Self-healing: if column not found in cache or other schema error
+        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+          console.warn('[CUSTOMER] Fetching only basic columns due to schema error...');
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('customers')
+            .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
+            .order('created_at', { ascending: false });
+            
+          if (fallbackError) {
+             console.warn('[CUSTOMER] Fallback fetch failed, trying minimal...');
+             const { data: minimalData, error: minimalError } = await supabase
+              .from('customers')
+              .select('id, name, location, event_date, budget, cost, status, plan_id, created_at')
+              .order('created_at', { ascending: false });
+             if (minimalError) return res.status(500).json({ message: minimalError.message });
+             return res.json(minimalData);
+          }
+          return res.json(fallbackData);
+        }
+        
         return res.status(500).json({ message: error.message });
       }
       res.json(data);
     } else {
       const customers = db.prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
       res.json(customers);
+    }
+  });
+
+  api.get('/admin/customers/:id', authenticate, async (req, res) => {
+    const { id } = req.params;
+    if (supabase) {
+      const { data, error } = await supabase.from('customers').select('*').eq('id', id).maybeSingle();
+      if (error) {
+        // Fallback for single record fetch
+        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+           const { data: fallbackData, error: fallbackError } = await supabase
+            .from('customers')
+            .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
+            .eq('id', id)
+            .maybeSingle();
+           if (fallbackError) return res.status(500).json({ message: fallbackError.message });
+           return res.json(fallbackData);
+        }
+        return res.status(500).json({ message: error.message });
+      }
+      res.json(data);
+    } else {
+      const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+      res.json(customer || null);
     }
   });
 
@@ -1166,12 +1213,18 @@ async function startServer() {
         console.error('[CUSTOMER] Supabase insert error:', error.message);
         
         // Self-healing: if column not found, try without event_name and other new columns
-        if (error.message.includes('column') && error.message.includes('not found')) {
-          console.warn('[CUSTOMER] Attempting fallback insert due to missing columns in Supabase...');
-          const fallbackPayload = { name, location, event_date, budget: numericBudget, cost: numericCost, status: status || 'Pendente', plan_id: numericPlanId };
+        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+          console.warn('[CUSTOMER] Attempting fallback insert due to schema error...');
+          const fallbackPayload = { 
+            name, location, event_date, 
+            budget: numericBudget, 
+            cost: numericCost, 
+            status: status || 'Pendente', 
+            plan_id: numericPlanId 
+          };
           const { error: fallbackError } = await supabase.from('customers').insert(fallbackPayload);
-          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers': event_name (text), phone (text), email (text), start_date (text), end_date (text)` });
-          return res.json({ success: true, warning: 'Saved without new fields. Please update Supabase schema.' });
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers' (event_name, phone, email, start_date, end_date) and refresh schema cache.` });
+          return res.json({ success: true, warning: 'Saved without some fields due to schema mismatch.' });
         }
         
         return res.status(500).json({ message: error.message });
@@ -1208,12 +1261,18 @@ async function startServer() {
         console.error('[CUSTOMER] Supabase update error:', error.message);
         
         // Self-healing fallback for missing columns
-        if (error.message.includes('column') && error.message.includes('not found')) {
-          console.warn('[CUSTOMER] Attempting fallback update due to missing columns in Supabase...');
-          const fallbackPayload = { name, location, event_date, budget: numericBudget, cost: numericCost, status, plan_id: numericPlanId };
+        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+          console.warn('[CUSTOMER] Attempting fallback update due to schema error...');
+          const fallbackPayload = { 
+            name, location, event_date, 
+            budget: numericBudget, 
+            cost: numericCost, 
+            status, 
+            plan_id: numericPlanId 
+          };
           const { error: fallbackError } = await supabase.from('customers').update(fallbackPayload).eq('id', id);
-          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers': event_name (text), phone (text), email (text), start_date (text), end_date (text)` });
-          return res.json({ success: true, warning: 'Updated without new fields. Please update Supabase schema.' });
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers' (event_name, phone, email, start_date, end_date) and refresh schema cache.` });
+          return res.json({ success: true, warning: 'Updated without some fields due to schema mismatch.' });
         }
         
         return res.status(500).json({ message: error.message });
@@ -1316,28 +1375,33 @@ async function startServer() {
 
   console.log('Registering routes...');
 
+  const initLogic = async () => {
+    // Initialize Supabase in the background
+    try {
+      const client = await initSupabase();
+      supabase = client;
+      console.log('Supabase background initialization finished.');
+    } catch (err) {
+      console.error('Supabase background initialization failed:', err);
+    }
+    
+    // Seed data
+    seedUsers();
+    seedPageContent();
+    seedPlans();
+    seedServices();
+  };
+
+  if (process.env.VERCEL === '1' || !!process.env.VERCEL) {
+    console.log('Vercel environment detected. Skipping listen but initializing background tasks.');
+    initLogic();
+    return;
+  }
+
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log('Routes registered and server is listening.');
-    
-    // Initialize Supabase in the background
-    initSupabase().then(client => {
-      supabase = client;
-      console.log('Supabase background initialization finished.');
-      
-      // Run seeding in background after Supabase is ready
-      seedUsers();
-      seedPageContent();
-      seedPlans();
-      seedServices();
-    }).catch(err => {
-      console.error('Supabase background initialization failed:', err);
-      // Even if Supabase fails, we still seed SQLite
-      seedUsers();
-      seedPageContent();
-      seedPlans();
-      seedServices();
-    });
+    initLogic();
   });
 }
 
@@ -1345,3 +1409,5 @@ startServer().catch(err => {
   console.error('FATAL: Failed to start server:', err);
   process.exit(1);
 });
+
+export default app;

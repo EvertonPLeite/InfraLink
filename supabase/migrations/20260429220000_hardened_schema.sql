@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE TABLE IF NOT EXISTS customers (
   id SERIAL PRIMARY KEY,
   name TEXT,
+  event_name TEXT,
   location TEXT,
   event_date TEXT,
   budget DECIMAL(10,2),

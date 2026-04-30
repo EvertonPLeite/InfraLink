@@ -385,6 +385,7 @@ function ManageCustomers() {
       head: [['ITEM', 'DESCRIÇÃO']],
       body: [
         ['CONTRATANTE', customer.name],
+        ['CONTATO', `${customer.phone || 'Não informado'} / ${customer.email || 'Não informado'}`],
         ['EVENTO', customer.event_name || 'Projeto Personalizado'],
         ['LOCALIZAÇÃO', customer.location],
         ['PLANO SELECIONADO', chosenPlan ? chosenPlan.name : 'Vendas Diretas / Sob Demanda'],
@@ -411,7 +412,7 @@ function ManageCustomers() {
       }
     });
 
-    let finalY = (doc as any).lastAutoTable.finalY + 20;
+    let finalY = (doc as any).lastAutoTable.finalY + 15;
     
     // Notes / Terms
     doc.setFontSize(9);
@@ -434,8 +435,9 @@ function ManageCustomers() {
       finalY += (splitText.length * 5);
     });
 
+    finalY += 25;
+
     // Signatures
-    finalY += 30;
     doc.setDrawColor(200, 200, 200);
     doc.line(20, finalY, 90, finalY);
     doc.line(120, finalY, 190, finalY);
