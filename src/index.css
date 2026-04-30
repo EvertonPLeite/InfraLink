@@ -115,4 +115,21 @@
   .tech-border:hover::before {
     @apply opacity-100;
   }
+
+  input[type="date"] {
+    color-scheme: dark;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.5) brightness(1.5);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    padding: 2px;
+    border-radius: 4px;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    filter: invert(1) brightness(2);
+    background: rgba(0, 255, 136, 0.1);
+  }
 }

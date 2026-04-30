@@ -266,12 +266,17 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
+    event_name TEXT,
     location TEXT,
     event_date TEXT,
     budget DECIMAL(10,2),
     cost DECIMAL(10,2) DEFAULT 0,
     status TEXT DEFAULT 'Pendente',
     plan_id INTEGER,
+    phone TEXT,
+    email TEXT,
+    start_date TEXT,
+    end_date TEXT,
     created_at TEXT DEFAULT (DATETIME('now'))
   );
 
@@ -344,6 +349,27 @@ try {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name ON plans(name)`);
   } catch (err) {
     console.warn("Could not create unique index on plans(name), might already be unique or have duplicates:", err);
+  }
+
+  // Customer table migrations
+  try {
+    const custColumns = db.prepare("PRAGMA table_info(customers)").all() as any[];
+    const requiredCustColumns = [
+      { name: 'event_name', type: 'TEXT' },
+      { name: 'phone', type: 'TEXT' },
+      { name: 'email', type: 'TEXT' },
+      { name: 'start_date', type: 'TEXT' },
+      { name: 'end_date', type: 'TEXT' }
+    ];
+
+    requiredCustColumns.forEach(reqCol => {
+      if (!custColumns.some(col => col.name === reqCol.name)) {
+        db.prepare(`ALTER TABLE customers ADD COLUMN ${reqCol.name} ${reqCol.type}`).run();
+        console.log(`Added missing column ${reqCol.name} to customers table`);
+      }
+    });
+  } catch (e) {
+    console.error("Customers migration error:", e);
   }
 } catch (e) {
   console.error("Database migration error:", e);
@@ -1116,17 +1142,17 @@ async function startServer() {
   });
 
   api.post('/admin/customers', authenticate, async (req, res) => {
-    let { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    let { name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
     
     // Sanitize numeric fields
     const numericBudget = parseFloat(budget) || 0;
     const numericCost = parseFloat(cost) || 0;
     const numericPlanId = plan_id ? parseInt(plan_id) : null;
 
-    console.log(`[CUSTOMER] Creating new customer: ${name} (${email})`);
+    console.log(`[CUSTOMER] Creating new customer: ${name} / Event: ${event_name} (${email})`);
     if (supabase) {
       const { error } = await supabase.from('customers').insert({ 
-        name, location, event_date, 
+        name, event_name, location, event_date, 
         budget: numericBudget, 
         cost: numericCost, 
         status: status || 'Pendente', 
@@ -1138,8 +1164,8 @@ async function startServer() {
         return res.status(500).json({ message: error.message });
       }
     } else {
-      db.prepare('INSERT INTO customers (name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        name, location, event_date, numericBudget, numericCost, status || 'Pendente', start_date, end_date, phone, email, numericPlanId
+      db.prepare('INSERT INTO customers (name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        name, event_name, location, event_date, numericBudget, numericCost, status || 'Pendente', start_date, end_date, phone, email, numericPlanId
       );
     }
     res.json({ success: true });
@@ -1147,7 +1173,7 @@ async function startServer() {
 
   api.put('/admin/customers/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    let { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    let { name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
     
     // Sanitize numeric fields
     const numericBudget = parseFloat(budget) || 0;
@@ -1156,7 +1182,7 @@ async function startServer() {
 
     if (supabase) {
       const { error } = await supabase.from('customers').update({ 
-        name, location, event_date, 
+        name, event_name, location, event_date, 
         budget: numericBudget, 
         cost: numericCost, 
         status, start_date, end_date, phone, email, 
@@ -1164,8 +1190,8 @@ async function startServer() {
       }).eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('UPDATE customers SET name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
-        name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
+      db.prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
+        name, event_name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
       );
     }
     res.json({ success: true });
@@ -1198,11 +1224,12 @@ async function startServer() {
 
   api.post('/admin/inventory', authenticate, async (req, res) => {
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
+    const numericPrice = parseFloat(price) || 0;
     if (supabase) {
-      const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status: status || 'Ativo' });
+      const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status: status || 'Ativo' });
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, price || 0, status || 'Ativo');
+      db.prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
     }
     res.json({ success: true });
   });
@@ -1210,11 +1237,12 @@ async function startServer() {
   api.put('/admin/inventory/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
+    const numericPrice = parseFloat(price) || 0;
     if (supabase) {
-      const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: price || 0, status }).eq('id', id);
+      const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status }).eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, price || 0, status, id);
+      db.prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status, id);
     }
     res.json({ success: true });
   });

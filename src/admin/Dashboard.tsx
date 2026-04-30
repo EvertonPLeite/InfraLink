@@ -1,6 +1,8 @@
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Trash2, Shield, ArrowLeft, Save, Loader2, Link2, BarChart3, Wifi, Globe, Zap, Satellite, Camera, Video, Battery, Database, Headset, Cpu, HardDrive, Share2, Radio, Link as LinkIcon, Activity, Users, Calendar, MapPin, DollarSign } from 'lucide-react';
+import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Trash2, Shield, ArrowLeft, Save, Loader2, Link2, BarChart3, Wifi, Globe, Zap, Satellite, Camera, Video, Battery, Database, Headset, Cpu, HardDrive, Share2, Radio, Link as LinkIcon, Activity, Users, Calendar, MapPin, DollarSign, Search, FileText } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, PieChart, Pie } from 'recharts';
 import { safeFetch } from '../lib/fetch';
@@ -182,10 +184,23 @@ function FinancialSummary({ customers = [], inventory = [] }: { customers: any[]
 function ManageCustomers() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
+  const [inventory, setInventory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const fetchInventory = () => {
+    safeFetch('/api/admin/inventory', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(data => setInventory(Array.isArray(data) ? data : []))
+      .catch(err => {
+        console.error('Error fetching inventory for summary:', err);
+        setInventory([]);
+      });
+  };
 
   const fetchCustomers = () => {
     safeFetch('/api/admin/customers', {
@@ -214,6 +229,7 @@ function ManageCustomers() {
   useEffect(() => {
     fetchCustomers();
     fetchPlans();
+    fetchInventory();
   }, []);
 
   const handleDelete = async (id: number) => {
@@ -277,6 +293,157 @@ function ManageCustomers() {
     return `${day}/${month}/${year}`;
   };
 
+  const generateContract = (customer: any) => {
+    const doc = new jsPDF();
+    const chosenPlan = Array.isArray(plans) ? plans.find(p => p.id === customer.plan_id) : null;
+    
+    // Minimalist Top Accent
+    doc.setFillColor(0, 255, 136); // brand-neon
+    doc.rect(0, 0, 210, 2, 'F');
+    
+    // Header - Clean Branding
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.setTextColor(20, 20, 20);
+    doc.text("InfraLink", 20, 25);
+    const mainWidth = doc.getTextWidth("InfraLink");
+    
+    doc.setTextColor(0, 255, 136);
+    doc.text(".", 20 + mainWidth, 25);
+    const dotWidth = doc.getTextWidth(".");
+    
+    doc.setTextColor(80, 80, 80);
+    doc.text("Eventos", 20 + mainWidth + dotWidth, 25);
+    
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(150, 150, 150);
+    doc.text("INFRAESTRUTURA TECNOLÓGICA & CONECTIVIDADE", 20, 32);
+
+    // Document Info (Right Aligned)
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`NÚMERO DO DOCUMENTO: #${String(customer.id).padStart(5, '0')}`, 140, 25);
+    doc.text(`EMISSÃO: ${new Date().toLocaleDateString('pt-BR')}`, 140, 30);
+
+    // Divider
+    doc.setDrawColor(240, 240, 240);
+    doc.line(20, 45, 190, 45);
+
+    // Client Info
+    let y = 60;
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 150);
+    doc.setFont("helvetica", "bold");
+    doc.text("CONTRATANTE", 20, y);
+    
+    y += 8;
+    doc.setFontSize(12);
+    doc.setTextColor(30, 30, 30);
+    doc.text(customer.name.toUpperCase(), 20, y);
+    
+    y += 6;
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text([
+      `E-mail: ${customer.email || "Não informado"}`,
+      `Fone: ${customer.phone || "Não informado"}`,
+      `Local: ${customer.location || "Não cadastrado"}`
+    ], 20, y);
+
+    // Event Title Section
+    y += 25;
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(150, 150, 150);
+    doc.text("IDENTIFICAÇÃO DO EVENTO", 20, y);
+    
+    y += 7;
+    doc.setFontSize(16);
+    doc.setTextColor(20, 20, 20);
+    doc.text((customer.event_name || customer.name).toUpperCase(), 20, y);
+    
+    y += 2;
+    doc.setDrawColor(0, 255, 136);
+    doc.setLineWidth(0.5);
+    doc.line(20, y + 1, 35, y + 1);
+
+    // Service Description
+    y += 15;
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(150, 150, 150);
+    doc.text("RESUMO DA PROPOSTA", 20, y);
+    
+    autoTable(doc, {
+      startY: y + 5,
+      head: [['ITEM', 'DETALHES']],
+      body: [
+        ['CONTRATANTE', customer.name],
+        ['EVENTO', customer.event_name || customer.name],
+        ['LOCAL', customer.location],
+        ['PLANO', chosenPlan ? chosenPlan.name : 'Vendas Diretas / Sob Demanda'],
+        ['CRONOGRAMA', `${formatDate(customer.event_date)} - ${formatDate(customer.end_date) || 'Contínuo'}`],
+        ['VALOR TOTAL', `R$ ${parseFloat(customer.budget).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
+      ],
+      theme: 'plain',
+      headStyles: { 
+        fillColor: [255, 255, 255], 
+        textColor: [0, 255, 136], 
+        fontStyle: 'bold',
+        fontSize: 9,
+        cellPadding: { bottom: 5 }
+      },
+      styles: { 
+        fontSize: 10, 
+        cellPadding: 4,
+        textColor: [60, 60, 60],
+        lineColor: [245, 245, 245],
+        lineWidth: 0.1
+      },
+      columnStyles: { 
+        0: { fontStyle: 'bold', cellWidth: 40, textColor: [120, 120, 120] } 
+      }
+    });
+
+    let finalY = (doc as any).lastAutoTable.finalY + 20;
+    
+    // Notes / Terms
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(150, 150, 150);
+    doc.text("CLÁUSULAS E CONDIÇÕES", 20, finalY);
+    
+    finalY += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    const terms = [
+      "I. A contratada compromete-se com a entrega da estabilidade de rede dentro dos padrões acordados.",
+      "II. O contratante deve fornecer acesso prévio ao local para instalação de equipamentos.",
+      "III. Danos causados por terceiros ao equipamento da contratada são de responsabilidade do contratante.",
+      "IV. O cancelamento com menos de 72h implica em multa de 30% sobre o valor total."
+    ];
+    terms.forEach(term => {
+      const splitText = doc.splitTextToSize(term, 170);
+      doc.text(splitText, 20, finalY);
+      finalY += (splitText.length * 5);
+    });
+
+    // Signatures
+    finalY += 30;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(20, finalY, 90, finalY);
+    doc.line(120, finalY, 190, finalY);
+    
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text("RESPONSÁVEL INFRALINK", 20, finalY + 5);
+    doc.text("ACEITE DO CONTRATANTE", 120, finalY + 5);
+
+    doc.save(`Proposta_Infralink_${customer.name.replace(/\s+/g, '_')}.pdf`);
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
 
   return (
@@ -292,7 +459,27 @@ function ManageCustomers() {
       </div>
 
       {/* Financial Dashboard */}
-      <FinancialSummary customers={customers} />
+      <FinancialSummary customers={customers} inventory={inventory} />
+
+      {/* Search Bar */}
+      <div className="relative group">
+        <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-neon transition-colors" size={20} />
+        <input 
+          type="text"
+          placeholder="Buscar por nome ou e-mail..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full bg-black/40 border border-white/10 rounded-[2rem] pl-16 pr-8 py-5 focus:border-brand-neon outline-none transition-all text-lg font-medium placeholder:text-white/10"
+        />
+        {searchTerm && (
+          <button 
+            onClick={() => setSearchTerm('')}
+            className="absolute right-6 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors text-xs font-bold uppercase"
+          >
+            Limpar
+          </button>
+        )}
+      </div>
 
       <AnimatePresence>
         {editingCustomer && (
@@ -305,18 +492,37 @@ function ManageCustomers() {
             <form onSubmit={saveCustomer} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
-                  <label className="block text-xs font-black uppercase text-white/40 mb-3">Nome do Cliente / Evento</label>
-                  <input name="name" defaultValue={editingCustomer.name} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" required />
+                  <label className="block text-xs font-black uppercase text-white/40 mb-3">Nome do Contratante (Cliente)</label>
+                  <input name="name" defaultValue={editingCustomer.name} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" placeholder="Ex: Everton Prado Leite" required />
                 </div>
                 <div>
+                  <label className="block text-xs font-black uppercase text-white/40 mb-3">Nome do Evento / Projeto</label>
+                  <input name="event_name" defaultValue={editingCustomer.event_name} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" placeholder="Ex: Simpósio de TI 2024" required />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Local (Cidade/Espaço)</label>
-                  <input name="location" defaultValue={editingCustomer.location} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" required />
+                  <input name="location" defaultValue={editingCustomer.location} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" placeholder="Ex: Hotel Glória, Rio de Janeiro" required />
+                </div>
+                <div>
+                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Status</label>
+                   <select name="status" defaultValue={editingCustomer.status || 'Pendente'} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon appearance-none outline-none">
+                     <option value="Pendente">Pendente</option>
+                     <option value="Em Negociação">Em Negociação</option>
+                     <option value="Confirmado">Confirmado</option>
+                     <option value="Concluído">Concluído</option>
+                     <option value="Cancelado">Cancelado</option>
+                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Data do Evento</label>
-                  <input name="event_date" type="date" defaultValue={editingCustomer.event_date} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" required />
+                  <div className="relative group">
+                    <Calendar className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-neon transition-colors pointer-events-none" size={18} />
+                    <input name="event_date" type="date" defaultValue={editingCustomer.event_date} className="w-full bg-black/40 border border-white/10 rounded-2xl pl-14 pr-6 py-4 focus:border-brand-neon outline-none transition-all" required />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Orçamento (R$)</label>
@@ -325,16 +531,6 @@ function ManageCustomers() {
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Custo (R$)</label>
                   <input name="cost" defaultValue={editingCustomer.cost || 0} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" placeholder="Ex: 1000.00" required />
-                </div>
-                <div>
-                  <label className="block text-xs font-black uppercase text-white/40 mb-3">Status</label>
-                  <select name="status" defaultValue={editingCustomer.status || 'Pendente'} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon appearance-none outline-none">
-                    <option value="Pendente">Pendente</option>
-                    <option value="Em Negociação">Em Negociação</option>
-                    <option value="Confirmado">Confirmado</option>
-                    <option value="Concluído">Concluído</option>
-                    <option value="Cancelado">Cancelado</option>
-                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Plano Contratado</label>
@@ -350,11 +546,17 @@ function ManageCustomers() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Início do Evento</label>
-                  <input name="start_date" type="date" defaultValue={editingCustomer.start_date} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" />
+                  <div className="relative group">
+                    <Calendar className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-neon transition-colors pointer-events-none" size={18} />
+                    <input name="start_date" type="date" defaultValue={editingCustomer.start_date} className="w-full bg-black/40 border border-white/10 rounded-2xl pl-14 pr-6 py-4 focus:border-brand-neon outline-none transition-all" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Término do Evento</label>
-                  <input name="end_date" type="date" defaultValue={editingCustomer.end_date} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" />
+                  <div className="relative group">
+                    <Calendar className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-neon transition-colors pointer-events-none" size={18} />
+                    <input name="end_date" type="date" defaultValue={editingCustomer.end_date} className="w-full bg-black/40 border border-white/10 rounded-2xl pl-14 pr-6 py-4 focus:border-brand-neon outline-none transition-all" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Telefone Cliente</label>
@@ -378,19 +580,32 @@ function ManageCustomers() {
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4">
-        {!Array.isArray(customers) || customers.length === 0 ? (
+        {(!Array.isArray(customers) || customers.length === 0) ? (
           <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
              <Users size={48} className="mx-auto text-white/10 mb-4" />
              <p className="text-white/40 font-medium">Nenhum cliente cadastrado ainda.</p>
           </div>
+        ) : customers.filter(customer => 
+            customer.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
+          ).length === 0 ? (
+          <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
+             <Search size={48} className="mx-auto text-white/10 mb-4" />
+             <p className="text-white/40 font-medium">Nenhum resultado encontrado para "{searchTerm}"</p>
+          </div>
         ) : (
-          customers.map(customer => {
+          customers
+            .filter(customer => 
+              customer.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+              (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
+            )
+            .map(customer => {
             const chosenPlan = Array.isArray(plans) ? plans.find(p => p.id === customer.plan_id) : null;
             return (
               <div key={customer.id} className="glass-panel p-8 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:border-white/20 transition-all">
                 <div className="flex-grow">
                    <div className="flex items-center gap-4 mb-4">
-                      <h4 className="text-xl font-bold">{customer.name}</h4>
+                      <h4 className="text-xl font-bold">{customer.event_name || customer.name}</h4>
                       {chosenPlan && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase" style={{ backgroundColor: `${chosenPlan.highlight_color}20`, color: chosenPlan.highlight_color }}>
                           {chosenPlan.name}
@@ -459,6 +674,13 @@ function ManageCustomers() {
                   </div>
                 ) : (
                   <>
+                    <button 
+                      onClick={() => generateContract(customer)}
+                      className="p-3 bg-white/5 rounded-xl hover:bg-brand-neon/20 hover:text-brand-neon transition-all"
+                      title="Gerar Contrato PDF"
+                    >
+                       <FileText size={18} />
+                    </button>
                     <button onClick={() => setEditingCustomer(customer)} className="p-3 bg-white/5 rounded-xl hover:bg-brand-blue/20 hover:text-brand-blue transition-all">
                        <Pencil size={18} />
                     </button>
@@ -1547,9 +1769,21 @@ function ManageServices() {
 
 function ManageInventory() {
   const [items, setItems] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const fetchCustomers = () => {
+    safeFetch('/api/admin/customers', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(data => setCustomers(Array.isArray(data) ? data : []))
+      .catch(err => {
+        console.error('Error fetching customers for summary in inventory:', err);
+        setCustomers([]);
+      });
+  };
 
   const fetchItems = () => {
     safeFetch('/api/admin/inventory', {
@@ -1566,7 +1800,10 @@ function ManageInventory() {
       });
   };
 
-  useEffect(fetchItems, []);
+  useEffect(() => {
+    fetchItems();
+    fetchCustomers();
+  }, []);
 
   const handleDelete = async (id: number) => {
     const token = localStorage.getItem('token');
@@ -1627,6 +1864,8 @@ function ManageInventory() {
         </button>
       </div>
 
+      <FinancialSummary customers={customers} inventory={items} />
+
       <AnimatePresence>
         {editingItem && (
           <motion.div 
@@ -1649,7 +1888,10 @@ function ManageInventory() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Data de Compra</label>
-                  <input name="purchase_date" type="date" defaultValue={editingItem.purchase_date} className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none" />
+                  <div className="relative group">
+                    <Calendar className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-brand-neon transition-colors pointer-events-none" size={18} />
+                    <input name="purchase_date" type="date" defaultValue={editingItem.purchase_date} className="w-full bg-black/40 border border-white/10 rounded-2xl pl-14 pr-6 py-4 focus:border-brand-neon outline-none transition-all" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-black uppercase text-white/40 mb-3">Número de Serial</label>
