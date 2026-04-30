@@ -430,11 +430,18 @@ const seedPageContent = async () => {
 
   // Supabase
   if (supabase) {
-    console.log('Syncing page_content to Supabase...');
+    console.log('Checking page_content in Supabase...');
     try {
-      const updates = seedContentData.map(c => ({ section: c[0], key: c[1], value: c[2] }));
-      const { error } = await supabase.from('page_content').upsert(updates, { onConflict: 'section,key' });
-      if (error) console.error('Supabase page_content sync error:', error.message);
+      const { data: existingContent, error: fetchError } = await supabase.from('page_content').select('id').limit(1);
+      
+      if (!fetchError && (!existingContent || existingContent.length === 0)) {
+        console.log('Supabase page_content is empty. Seeding initial data...');
+        const updates = seedContentData.map(c => ({ section: c[0], key: c[1], value: c[2] }));
+        const { error } = await supabase.from('page_content').insert(updates);
+        if (error) console.error('Supabase page_content sync error:', error.message);
+      } else if (fetchError) {
+        console.error('Error checking if page_content is empty in Supabase:', fetchError.message);
+      }
     } catch (err) {
       console.error('Supabase page_content sync exception:', err);
     }
@@ -457,44 +464,33 @@ const seedPageContent = async () => {
           db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(plan.name, plan.description, plan.price, plan.period, plan.features, plan.badge_text, plan.highlight_color, plan.is_featured, plan.cta_text, plan.cta_url, plan.order_index);
         } else if (existing.cta_url === '#' || !existing.cta_url) {
           db.prepare('UPDATE plans SET cta_url = ? WHERE id = ?').run(plan.cta_url, existing.id);
-          console.log(`Updated SQLite plan URL for ${plan.name}`);
         }
       }
 
       if (supabase) {
-        console.log('Seeding/Syncing plans into Supabase...');
+        console.log('Checking plans in Supabase...');
 
-        // Manual cleanup for Supabase if needed
-        const { data: existingSupabasePlans } = await supabase.from('plans').select('id, name, cta_url').order('id', { ascending: true });
-        if (existingSupabasePlans && existingSupabasePlans.length > 0) {
-          const namesSeen = new Set();
-          const toDelete = [];
-          for (const p of existingSupabasePlans) {
-            if (namesSeen.has(p.name)) {
-              toDelete.push(p.id);
-            } else {
-              namesSeen.add(p.name);
-              // Update existing if URL is '#'
-              if (p.cta_url === '#' || !p.cta_url) {
-                const target = initialPlans.find(ip => ip.name === p.name);
-                if (target) {
-                  await supabase.from('plans').update({ cta_url: target.cta_url }).eq('id', p.id);
-                  console.log(`Updated Supabase plan URL for ${p.name}`);
-                }
-              }
-            }
-          }
-          if (toDelete.length > 0) {
-            console.log(`Deleting ${toDelete.length} duplicate plans from Supabase...`);
-            await supabase.from('plans').delete().in('id', toDelete);
-          }
+        const { data: existingSupabasePlans, error: checkError } = await supabase.from('plans').select('id, name, cta_url').order('id', { ascending: true });
+        
+        if (checkError) {
+          console.error('Error checking plans in Supabase:', checkError.message);
+          return;
         }
 
-        const { error: upsertError } = await supabase.from('plans').upsert(initialPlans, { onConflict: 'name' });
-        if (upsertError) {
-          console.error('Error upserting plans to Supabase:', upsertError.message);
-          for (const plan of initialPlans) {
-            await supabase.from('plans').upsert(plan, { onConflict: 'name' });
+        if (!existingSupabasePlans || existingSupabasePlans.length === 0) {
+          console.log('Supabase plans table is empty. Seeding initial plans...');
+          const { error: insertError } = await supabase.from('plans').insert(initialPlans);
+          if (insertError) console.error('Error seeding plans to Supabase:', insertError.message);
+        } else {
+          // Sync URLs if they are still defaults '#'
+          for (const p of existingSupabasePlans) {
+            if (p.cta_url === '#' || !p.cta_url) {
+              const target = initialPlans.find(ip => ip.name === p.name);
+              if (target) {
+                await supabase.from('plans').update({ cta_url: target.cta_url }).eq('id', p.id);
+                console.log(`Synced default URL for Supabase plan: ${p.name}`);
+              }
+            }
           }
         }
       }
@@ -522,34 +518,18 @@ const seedPageContent = async () => {
       }
 
       if (supabase) {
-        console.log('Seeding/Syncing services into Supabase...');
+        console.log('Checking services in Supabase...');
+        const { data: existingServices, error: checkError } = await supabase.from('services').select('id').limit(1);
         
-        // Manual cleanup for Supabase if needed (before unique constraint might be active)
-        const { data: existingSupabaseServices } = await supabase.from('services').select('id, title').order('id', { ascending: true });
-        if (existingSupabaseServices && existingSupabaseServices.length > 0) {
-          const titlesSeen = new Set();
-          const toDelete = [];
-          for (const s of existingSupabaseServices) {
-            if (titlesSeen.has(s.title)) {
-              toDelete.push(s.id);
-            } else {
-              titlesSeen.add(s.title);
-            }
-          }
-          if (toDelete.length > 0) {
-            console.log(`Deleting ${toDelete.length} duplicate services from Supabase...`);
-            await supabase.from('services').delete().in('id', toDelete);
-          }
+        if (checkError) {
+          console.error('Error checking services in Supabase:', checkError.message);
+          return;
         }
 
-        // Using upsert with onConflict on title
-        const { error: upsertError } = await supabase.from('services').upsert(initialServices, { onConflict: 'title' });
-        if (upsertError) {
-          console.error('Error upserting services to Supabase:', upsertError.message);
-          // Fallback: individual upsert if bulk fails
-          for (const service of initialServices) {
-            await supabase.from('services').upsert(service, { onConflict: 'title' });
-          }
+        if (!existingServices || existingServices.length === 0) {
+          console.log('Supabase services table is empty. Seeding initial services...');
+          const { error: insertError } = await supabase.from('services').insert(initialServices);
+          if (insertError) console.error('Error seeding services to Supabase:', insertError.message);
         }
       }
     } catch (err) {
@@ -1136,28 +1116,57 @@ async function startServer() {
   });
 
   api.post('/admin/customers', authenticate, async (req, res) => {
-    const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    let { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    
+    // Sanitize numeric fields
+    const numericBudget = parseFloat(budget) || 0;
+    const numericCost = parseFloat(cost) || 0;
+    const numericPlanId = plan_id ? parseInt(plan_id) : null;
+
     console.log(`[CUSTOMER] Creating new customer: ${name} (${email})`);
     if (supabase) {
-      const { error } = await supabase.from('customers').insert({ name, location, event_date, budget, cost: cost || 0, status: status || 'Pendente', start_date, end_date, phone, email, plan_id });
+      const { error } = await supabase.from('customers').insert({ 
+        name, location, event_date, 
+        budget: numericBudget, 
+        cost: numericCost, 
+        status: status || 'Pendente', 
+        start_date, end_date, phone, email, 
+        plan_id: numericPlanId 
+      });
       if (error) {
         console.error('[CUSTOMER] Supabase insert error:', error.message, error.details, error.hint);
         return res.status(500).json({ message: error.message });
       }
     } else {
-      db.prepare('INSERT INTO customers (name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, location, event_date, budget, cost || 0, status || 'Pendente', start_date, end_date, phone, email, plan_id);
+      db.prepare('INSERT INTO customers (name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        name, location, event_date, numericBudget, numericCost, status || 'Pendente', start_date, end_date, phone, email, numericPlanId
+      );
     }
     res.json({ success: true });
   });
 
   api.put('/admin/customers/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    const { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    let { name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id } = req.body;
+    
+    // Sanitize numeric fields
+    const numericBudget = parseFloat(budget) || 0;
+    const numericCost = parseFloat(cost) || 0;
+    const numericPlanId = plan_id ? parseInt(plan_id) : null;
+
     if (supabase) {
-      const { error } = await supabase.from('customers').update({ name, location, event_date, budget, cost: cost || 0, status, start_date, end_date, phone, email, plan_id }).eq('id', id);
+      const { error } = await supabase.from('customers').update({ 
+        name, location, event_date, 
+        budget: numericBudget, 
+        cost: numericCost, 
+        status, start_date, end_date, phone, email, 
+        plan_id: numericPlanId 
+      }).eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('UPDATE customers SET name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(name, location, event_date, budget, cost || 0, status, start_date, end_date, phone, email, plan_id, id);
+      db.prepare('UPDATE customers SET name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
+        name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
+      );
     }
     res.json({ success: true });
   });

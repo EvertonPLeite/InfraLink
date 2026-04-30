@@ -72,13 +72,31 @@ export default function Plans() {
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
                 viewport={{ once: true }}
-                className={`glass-panel p-10 rounded-[2rem] flex flex-col group relative transition-all duration-500 hover:-translate-y-2 ${isFeatured ? "scale-105 z-10" : "border-white/5"}`}
+                whileHover={{ y: -15, transition: { duration: 0.3 } }}
+                className={`glass-panel p-10 rounded-[2rem] flex flex-col group relative transition-all duration-500 ${isFeatured ? "scale-105 z-10" : "border-white/5 active:scale-95"}`}
                 style={isFeatured ? { 
-                  boxShadow: `0 20px 50px ${highlightColor}20`,
-                  border: `1px solid ${highlightColor}40`,
-                  outline: `1px solid ${highlightColor}`
+                  boxShadow: `0 25px 60px ${highlightColor}25`,
+                  border: `1px solid ${highlightColor}50`,
+                  outline: `1px solid ${highlightColor}20`
                 } : {}}
               >
+                {/* Enhanced Hover Glow */}
+                <div 
+                  className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all duration-700 blur-[100px] rounded-full pointer-events-none -z-10"
+                  style={{ backgroundColor: `${highlightColor}15` }}
+                />
+
+                {/* Card Edge Glow */}
+                <div 
+                  className="absolute inset-0 rounded-[2rem] opacity-0 group-hover:opacity-100 transition-all duration-500 pointer-events-none border"
+                  style={{ borderColor: `${highlightColor}40`, boxShadow: `0 0 30px ${highlightColor}10` }}
+                />
+
+                {/* Shine Sweep Effect */}
+                <div className="absolute inset-0 rounded-[2rem] overflow-hidden pointer-events-none">
+                  <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+                </div>
+
                 {plan.badge_text && (
                   <div 
                     className="absolute -top-4 left-1/2 -translate-x-1/2 px-5 py-2 text-brand-black text-[10px] font-black uppercase tracking-[0.2em] rounded-full flex items-center gap-2 shadow-lg"
