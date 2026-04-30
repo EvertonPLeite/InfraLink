@@ -1151,16 +1151,29 @@ async function startServer() {
 
     console.log(`[CUSTOMER] Creating new customer: ${name} / Event: ${event_name} (${email})`);
     if (supabase) {
-      const { error } = await supabase.from('customers').insert({ 
+      const payload = { 
         name, event_name, location, event_date, 
         budget: numericBudget, 
         cost: numericCost, 
         status: status || 'Pendente', 
         start_date, end_date, phone, email, 
         plan_id: numericPlanId 
-      });
+      };
+
+      const { error } = await supabase.from('customers').insert(payload);
+      
       if (error) {
-        console.error('[CUSTOMER] Supabase insert error:', error.message, error.details, error.hint);
+        console.error('[CUSTOMER] Supabase insert error:', error.message);
+        
+        // Self-healing: if column not found, try without event_name and other new columns
+        if (error.message.includes('column') && error.message.includes('not found')) {
+          console.warn('[CUSTOMER] Attempting fallback insert due to missing columns in Supabase...');
+          const fallbackPayload = { name, location, event_date, budget: numericBudget, cost: numericCost, status: status || 'Pendente', plan_id: numericPlanId };
+          const { error: fallbackError } = await supabase.from('customers').insert(fallbackPayload);
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers': event_name (text), phone (text), email (text), start_date (text), end_date (text)` });
+          return res.json({ success: true, warning: 'Saved without new fields. Please update Supabase schema.' });
+        }
+        
         return res.status(500).json({ message: error.message });
       }
     } else {
@@ -1181,14 +1194,30 @@ async function startServer() {
     const numericPlanId = plan_id ? parseInt(plan_id) : null;
 
     if (supabase) {
-      const { error } = await supabase.from('customers').update({ 
+      const payload = { 
         name, event_name, location, event_date, 
         budget: numericBudget, 
         cost: numericCost, 
         status, start_date, end_date, phone, email, 
         plan_id: numericPlanId 
-      }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
+      };
+
+      const { error } = await supabase.from('customers').update(payload).eq('id', id);
+      
+      if (error) {
+        console.error('[CUSTOMER] Supabase update error:', error.message);
+        
+        // Self-healing fallback for missing columns
+        if (error.message.includes('column') && error.message.includes('not found')) {
+          console.warn('[CUSTOMER] Attempting fallback update due to missing columns in Supabase...');
+          const fallbackPayload = { name, location, event_date, budget: numericBudget, cost: numericCost, status, plan_id: numericPlanId };
+          const { error: fallbackError } = await supabase.from('customers').update(fallbackPayload).eq('id', id);
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers': event_name (text), phone (text), email (text), start_date (text), end_date (text)` });
+          return res.json({ success: true, warning: 'Updated without new fields. Please update Supabase schema.' });
+        }
+        
+        return res.status(500).json({ message: error.message });
+      }
     } else {
       db.prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
         name, event_name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id

@@ -269,7 +269,7 @@ function ManageCustomers() {
     const url = editingCustomer?.id ? `/api/admin/customers/${editingCustomer.id}` : '/api/admin/customers';
 
     try {
-      await safeFetch(url, {
+      const response = await safeFetch(url, {
         method,
         headers: { 
           'Content-Type': 'application/json',
@@ -277,6 +277,10 @@ function ManageCustomers() {
         },
         body: JSON.stringify(data)
       });
+
+      if (response && (response as any).warning) {
+        alert(`Aviso: ${(response as any).warning}`);
+      }
 
       setEditingCustomer(null);
       fetchCustomers();
@@ -353,11 +357,11 @@ function ManageCustomers() {
     ], 20, y);
 
     // Event Title Section
-    y += 25;
+    y += 28;
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(150, 150, 150);
-    doc.text("IDENTIFICAÇÃO DO EVENTO", 20, y);
+    doc.text("DADOS DO PROJETO / EVENTO", 20, y);
     
     y += 7;
     doc.setFontSize(16);
@@ -366,26 +370,26 @@ function ManageCustomers() {
     
     y += 2;
     doc.setDrawColor(0, 255, 136);
-    doc.setLineWidth(0.5);
-    doc.line(20, y + 1, 35, y + 1);
+    doc.setLineWidth(1);
+    doc.line(20, y + 1, 45, y + 1);
 
     // Service Description
-    y += 15;
+    y += 18;
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(150, 150, 150);
-    doc.text("RESUMO DA PROPOSTA", 20, y);
+    doc.text("RESUMO DA PROPOSTA TÉCNICA", 20, y);
     
     autoTable(doc, {
       startY: y + 5,
-      head: [['ITEM', 'DETALHES']],
+      head: [['ITEM', 'DESCRIÇÃO']],
       body: [
         ['CONTRATANTE', customer.name],
-        ['EVENTO', customer.event_name || customer.name],
-        ['LOCAL', customer.location],
-        ['PLANO', chosenPlan ? chosenPlan.name : 'Vendas Diretas / Sob Demanda'],
-        ['CRONOGRAMA', `${formatDate(customer.event_date)} - ${formatDate(customer.end_date) || 'Contínuo'}`],
-        ['VALOR TOTAL', `R$ ${parseFloat(customer.budget).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
+        ['EVENTO', customer.event_name || 'Projeto Personalizado'],
+        ['LOCALIZAÇÃO', customer.location],
+        ['PLANO SELECIONADO', chosenPlan ? chosenPlan.name : 'Vendas Diretas / Sob Demanda'],
+        ['PERÍODO', `${formatDate(customer.event_date)}${customer.end_date ? ` até ${formatDate(customer.end_date)}` : ''}`],
+        ['INVESTIMENTO', `R$ ${parseFloat(customer.budget).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
       ],
       theme: 'plain',
       headStyles: { 
@@ -587,7 +591,9 @@ function ManageCustomers() {
           </div>
         ) : customers.filter(customer => 
             customer.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-            (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
+            (customer.event_name && customer.event_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (customer.location && customer.location.toLowerCase().includes(searchTerm.toLowerCase()))
           ).length === 0 ? (
           <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
              <Search size={48} className="mx-auto text-white/10 mb-4" />
@@ -597,7 +603,9 @@ function ManageCustomers() {
           customers
             .filter(customer => 
               customer.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-              (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
+              (customer.event_name && customer.event_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+              (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+              (customer.location && customer.location.toLowerCase().includes(searchTerm.toLowerCase()))
             )
             .map(customer => {
             const chosenPlan = Array.isArray(plans) ? plans.find(p => p.id === customer.plan_id) : null;
