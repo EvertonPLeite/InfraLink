@@ -564,6 +564,10 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // 4. API Routes (MOUNTED EARLY to avoid conflicts)
+  const api = express.Router();
+  app.use('/api', api);
+
   // 2. Logging Middleware
   app.use((req, res, next) => {
     const isViteRequest = req.url.startsWith('/@') || req.url.startsWith('/node_modules') || req.url.includes('?v=') || req.url.includes('?t=');
@@ -596,7 +600,7 @@ async function startServer() {
   app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
 
   // 4. API Routes
-  const api = express.Router();
+  // (Router defined earlier)
 
   // Add a dedicated logger for API requests
   api.use((req, res, next) => {
@@ -1223,17 +1227,11 @@ async function startServer() {
     res.status(404).json({ message: `Route ${req.method} ${req.url} not found on API router` });
   });
 
-  // Mount API router
-  console.log('Mounting /api router...');
-  app.use('/api', api);
-
   // --- Global API Fallback (Catch-all for /api that missed the router) ---
   app.all('/api/*', (req, res) => {
     console.log(`[GLOBAL-404] API Not Found: ${req.method} ${req.url}`);
     res.status(404).json({ message: `Route ${req.method} ${req.url} not found` });
   });
-
-  // 1238 was here
 
   // --- Vite / Frontend Serving ---
   if (process.env.NODE_ENV !== 'production') {
