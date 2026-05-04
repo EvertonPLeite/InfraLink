@@ -1,5 +1,119 @@
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Trash2, Shield, ArrowLeft, Save, Loader2, Link2, BarChart3, Wifi, Globe, Zap, Satellite, Camera, Video, Battery, Database, Headset, Cpu, HardDrive, Share2, Radio, Link as LinkIcon, Activity, Users, Calendar, MapPin, DollarSign, Search, FileText } from 'lucide-react';
+import { LayoutDashboard, Package, FileEdit, Settings, LogOut, Plus, Pencil, Trash2, Shield, ArrowLeft, Save, Loader2, Link2, BarChart3, Wifi, Globe, Zap, Satellite, Camera, Video, Battery, Database, Headset, Cpu, HardDrive, Share2, Radio, Link as LinkIcon, Activity, Users, Calendar, MapPin, DollarSign, Search, FileText, Upload, Check } from 'lucide-react';
+
+// Reusable Image Upload Component with Progress Bar
+function ImageUploadField({ value, onChange, label, placeholder = "Arraste ou clique para upload" }: { value: string, onChange: (val: string) => void, label: string, placeholder?: string }) {
+  const [progress, setProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleFile = (file: File) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    
+    setUploading(true);
+    setProgress(0);
+    
+    // Simulate/Show progress during file reading
+    const reader = new FileReader();
+    
+    reader.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        setProgress(percent);
+      }
+    };
+
+    reader.onload = (e) => {
+      // Small artificial delay to show progress bar if it was too fast
+      let currentProgress = progress;
+      const interval = setInterval(() => {
+        currentProgress += 5;
+        if (currentProgress >= 100) {
+          clearInterval(interval);
+          setUploading(false);
+          onChange(e.target?.result as string);
+          setTimeout(() => setProgress(0), 1000);
+        } else {
+          setProgress(currentProgress);
+        }
+      }, 20);
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-xs font-black uppercase text-white/40">{label}</label>
+      
+      <div 
+        className={`relative h-32 rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-3 overflow-hidden
+          ${dragActive ? 'border-brand-neon bg-brand-neon/5 scale-[0.98]' : 'border-white/10 bg-white/5 hover:border-white/20'}
+          ${uploading ? 'pointer-events-none' : 'cursor-pointer'}
+        `}
+        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={(e) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]); }}
+        onClick={() => !uploading && document.getElementById(`file-input-${label.replace(/\s+/g, '')}`)?.click()}
+      >
+        <input 
+          id={`file-input-${label.replace(/\s+/g, '')}`}
+          type="file" 
+          className="hidden" 
+          accept="image/*"
+          onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }}
+        />
+
+        {uploading ? (
+          <div className="w-full px-12 text-center animate-in fade-in zoom-in duration-300">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon mb-3">Enviando... {progress}%</p>
+            <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+              <motion.div 
+                className="h-full bg-brand-neon shadow-[0_0_10px_rgba(0,255,136,0.5)]"
+                initial={{ width: "0%" }}
+                animate={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <>
+            {value ? (
+              <div className="absolute inset-0 flex items-center justify-center p-2">
+                <img src={value} alt="Preview" className="max-h-full max-w-full object-contain rounded-lg opacity-40 grayscale group-hover:grayscale-0 transition-all" />
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                   <div className="p-3 bg-brand-neon/20 rounded-2xl text-brand-neon">
+                      <Upload size={24} />
+                   </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="p-3 bg-white/5 rounded-2xl text-white/20">
+                  <Upload size={24} />
+                </div>
+                <p className="text-xs font-bold text-white/40">{placeholder}</p>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="flex gap-4">
+        <input 
+          className="flex-grow bg-black/40 border border-white/10 rounded-xl px-4 py-3 focus:border-brand-neon outline-none font-mono text-[10px] text-white/50"
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Ou cole a URL aqui..."
+        />
+        {value && (
+          <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center text-green-500 border border-green-500/20">
+            <Check size={18} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 import React, { useState, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -940,22 +1054,12 @@ function EditContent() {
                   onChange={(e) => handleChange('general', 'site_name', e.target.value)}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-black uppercase text-white/40 mb-3">URL da Logo (ou Base64)</label>
-                <div className="flex gap-4">
-                  <input 
-                    className="flex-grow bg-black/40 border border-white/10 rounded-2xl px-6 py-4 focus:border-brand-neon outline-none font-mono text-xs"
-                    value={content.general?.logo_url || ''}
-                    onChange={(e) => handleChange('general', 'logo_url', e.target.value)}
-                    placeholder="https://..."
-                  />
-                  {content.general?.logo_url && (
-                    <div className="w-14 h-14 bg-white/5 rounded-xl overflow-hidden flex items-center justify-center p-2">
-                       <img src={content.general.logo_url} alt="Logo Preview" className="max-h-full max-w-full object-contain" />
-                    </div>
-                  )}
-                </div>
-              </div>
+              <ImageUploadField 
+                label="Logo do Site"
+                value={content.general?.logo_url || ''}
+                onChange={(val) => handleChange('general', 'logo_url', val)}
+                placeholder="Upload da Logo (.png, .jpg, .svg)"
+              />
            </div>
         </div>
 
