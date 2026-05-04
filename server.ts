@@ -177,12 +177,31 @@ async function initSupabase() {
   }
 }
 
-// Database Setup (SQLite fallback)
-const db = new Database('database.sqlite');
-db.pragma('journal_mode = WAL');
+// Database Setup (SQLite fallback - Lazy)
+let db: any = null;
+function getDb() {
+  if (!db) {
+    try {
+      db = new Database('database.sqlite');
+      db.pragma('journal_mode = WAL');
+      console.log('SQLite database initialized.');
+    } catch (err) {
+      console.warn('Failed to initialize SQLite. This is expected on some serverless environments if Supabase is active.', err);
+      // Create a mock or null db that throws on use if needed
+      db = {
+        prepare: () => ({ all: () => [], get: () => null, run: () => ({}) }),
+        exec: () => ({}),
+        pragma: () => ({})
+      };
+    }
+  }
+  return db;
+}
 
 // Initialize Tables
-db.exec(`
+function initSqliteTables() {
+  const localDb = getDb();
+  localDb.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
@@ -196,29 +215,29 @@ db.exec(`
 
 // Migrations for users table
 try {
-  const columns = db.prepare("PRAGMA table_info(users)").all() as any[];
+  const columns = localDb.prepare("PRAGMA table_info(users)").all() as any[];
   const hasResetToken = columns.some(c => c.name === 'reset_token');
   const hasResetExpiry = columns.some(c => c.name === 'reset_token_expiry');
   const has2FASecret = columns.some(c => c.name === 'two_factor_secret');
   const has2FAEnabled = columns.some(c => c.name === 'two_factor_enabled');
 
   if (!hasResetToken) {
-    db.prepare('ALTER TABLE users ADD COLUMN reset_token TEXT').run();
+    localDb.prepare('ALTER TABLE users ADD COLUMN reset_token TEXT').run();
   }
   if (!hasResetExpiry) {
-    db.prepare('ALTER TABLE users ADD COLUMN reset_token_expiry INTEGER').run();
+    localDb.prepare('ALTER TABLE users ADD COLUMN reset_token_expiry INTEGER').run();
   }
   if (!has2FASecret) {
-    db.prepare('ALTER TABLE users ADD COLUMN two_factor_secret TEXT').run();
+    localDb.prepare('ALTER TABLE users ADD COLUMN two_factor_secret TEXT').run();
   }
   if (!has2FAEnabled) {
-    db.prepare('ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0').run();
+    localDb.prepare('ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0').run();
   }
 } catch (e) {
   console.error("Users migration error:", e);
 }
 
-db.exec(`
+localDb.exec(`
   CREATE TABLE IF NOT EXISTS inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -291,7 +310,7 @@ db.exec(`
 
 // Check if missing columns exist in plans table, if not add them (Migration)
 try {
-  const planColumns = db.prepare("PRAGMA table_info(plans)").all() as any[];
+  const planColumns = localDb.prepare("PRAGMA table_info(plans)").all() as any[];
   const requiredColumns = [
     { name: 'period', type: 'TEXT' },
     { name: 'features', type: 'TEXT' },
@@ -305,7 +324,7 @@ try {
 
   requiredColumns.forEach(reqCol => {
     if (!planColumns.some(col => col.name === reqCol.name)) {
-      db.prepare(`ALTER TABLE plans ADD COLUMN ${reqCol.name} ${reqCol.type}`).run();
+      localDb.prepare(`ALTER TABLE plans ADD COLUMN ${reqCol.name} ${reqCol.type}`).run();
       console.log(`Added missing column ${reqCol.name} to plans table`);
     }
   });
@@ -315,45 +334,45 @@ try {
 
 // Check if icon column exists, if not add it (Migration)
 try {
-  const columns = db.prepare("PRAGMA table_info(services)").all() as any[];
+  const columns = localDb.prepare("PRAGMA table_info(services)").all() as any[];
   if (!columns.some(col => col.name === 'icon')) {
-    db.prepare('ALTER TABLE services ADD COLUMN icon TEXT').run();
+    localDb.prepare('ALTER TABLE services ADD COLUMN icon TEXT').run();
   }
   
   // Cleanup duplicates in SQLite if they exist before adding UNIQUE index
-  const duplicateServices = db.prepare('SELECT title, COUNT(*) as count FROM services GROUP BY title HAVING count > 1').all() as any[];
+  const duplicateServices = localDb.prepare('SELECT title, COUNT(*) as count FROM services GROUP BY title HAVING count > 1').all() as any[];
   if (duplicateServices.length > 0) {
     console.log(`Cleaning up ${duplicateServices.length} duplicate service titles in SQLite...`);
     duplicateServices.forEach(dup => {
-      const firstId = db.prepare('SELECT id FROM services WHERE title = ? ORDER BY id ASC LIMIT 1').get(dup.title) as any;
-      db.prepare('DELETE FROM services WHERE title = ? AND id != ?').run(dup.title, firstId.id);
+      const firstId = localDb.prepare('SELECT id FROM services WHERE title = ? ORDER BY id ASC LIMIT 1').get(dup.title) as any;
+      localDb.prepare('DELETE FROM services WHERE title = ? AND id != ?').run(dup.title, firstId.id);
     });
   }
   
   try {
-    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_services_title ON services(title)`);
+    localDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_services_title ON services(title)`);
   } catch (err) {
     console.warn("Could not create unique index on services(title), might already be unique or have duplicates:", err);
   }
 
-  const duplicatePlans = db.prepare('SELECT name, COUNT(*) as count FROM plans GROUP BY name HAVING count > 1').all() as any[];
+  const duplicatePlans = localDb.prepare('SELECT name, COUNT(*) as count FROM plans GROUP BY name HAVING count > 1').all() as any[];
   if (duplicatePlans.length > 0) {
     console.log(`Cleaning up ${duplicatePlans.length} duplicate plan names in SQLite...`);
     duplicatePlans.forEach(dup => {
-      const firstId = db.prepare('SELECT id FROM plans WHERE name = ? ORDER BY id ASC LIMIT 1').get(dup.name) as any;
-      db.prepare('DELETE FROM plans WHERE name = ? AND id != ?').run(dup.name, firstId.id);
+      const firstId = localDb.prepare('SELECT id FROM plans WHERE name = ? ORDER BY id ASC LIMIT 1').get(dup.name) as any;
+      localDb.prepare('DELETE FROM plans WHERE name = ? AND id != ?').run(dup.name, firstId.id);
     });
   }
 
   try {
-    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name ON plans(name)`);
+    localDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name ON plans(name)`);
   } catch (err) {
     console.warn("Could not create unique index on plans(name), might already be unique or have duplicates:", err);
   }
 
   // Customer table migrations
   try {
-    const custColumns = db.prepare("PRAGMA table_info(customers)").all() as any[];
+    const custColumns = localDb.prepare("PRAGMA table_info(customers)").all() as any[];
     const requiredCustColumns = [
       { name: 'event_name', type: 'TEXT' },
       { name: 'phone', type: 'TEXT' },
@@ -364,7 +383,7 @@ try {
 
     requiredCustColumns.forEach(reqCol => {
       if (!custColumns.some(col => col.name === reqCol.name)) {
-        db.prepare(`ALTER TABLE customers ADD COLUMN ${reqCol.name} ${reqCol.type}`).run();
+        localDb.prepare(`ALTER TABLE customers ADD COLUMN ${reqCol.name} ${reqCol.type}`).run();
         console.log(`Added missing column ${reqCol.name} to customers table`);
       }
     });
@@ -377,7 +396,7 @@ try {
 
   // Check if cost column exists in customers table, if not add it (Migration)
   try {
-    const customerColumns = db.prepare("PRAGMA table_info(customers)").all() as any[];
+    const customerColumns = localDb.prepare("PRAGMA table_info(customers)").all() as any[];
     const requiredCols = [
       { name: 'cost', type: 'DECIMAL(10,2) DEFAULT 0' },
       { name: 'start_date', type: 'TEXT' },
@@ -389,26 +408,28 @@ try {
     
     requiredCols.forEach(col => {
       if (!customerColumns.some(c => c.name === col.name)) {
-        db.prepare(`ALTER TABLE customers ADD COLUMN ${col.name} ${col.type}`).run();
+        localDb.prepare(`ALTER TABLE customers ADD COLUMN ${col.name} ${col.type}`).run();
         console.log(`Added missing column ${col.name} to customers table`);
       }
     });
   } catch (e) {
     console.error("Customers migration error:", e);
   }
+}
 
 // Seed Initial Data
 const seedUsers = async () => {
   const users = ['admin', 'infralinkeventos@gmail.com'];
   const password = 'admin123';
   const hash = bcrypt.hashSync(password, 10);
+  const localDb = getDb();
 
   for (const username of users) {
     // SQLite
-    const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    const existingUser = localDb.prepare('SELECT id FROM users WHERE username = ?').get(username);
     if (!existingUser) {
       console.log(`Seeding user ${username} into SQLite...`);
-      db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username, hash);
+      localDb.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username, hash);
     }
 
     // Supabase
@@ -451,7 +472,8 @@ const seedContentData = [
 
 const seedPageContent = async () => {
   // SQLite
-  const insertContent = db.prepare('INSERT OR IGNORE INTO page_content (section, key, value) VALUES (?, ?, ?)');
+  const localDb = getDb();
+  const insertContent = localDb.prepare('INSERT OR IGNORE INTO page_content (section, key, value) VALUES (?, ?, ?)');
   seedContentData.forEach(c => insertContent.run(c[0], c[1], c[2]));
 
   // Supabase
@@ -472,24 +494,23 @@ const seedPageContent = async () => {
       console.error('Supabase page_content sync exception:', err);
     }
   }
-};
-
-  // Seed Initial Data
+}  // Seed Initial Data
   const seedPlans = async () => {
     try {
+      const localDb = getDb();
       const initialPlans = [
         { name: 'Starter', description: 'Ideal para eventos pequenos com até 200 pessoas', price: 'R$ 890', period: 'por evento', features: 'Internet via satélite 50 Mbps,Até 3 pontos de acesso Wi-Fi,Suporte remoto durante evento,Relatório de uso pós-evento', badge_text: '', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Contratar plano', cta_url: 'https://wa.me/5535988019507?text=Olá!%20Tenho%20interesse%20no%20Plano%20Starter%20para%20meu%20evento.', order_index: 0 },
         { name: 'Professional', description: 'Para eventos médios de 200 a 1.000 pessoas com infraestrutura robusta', price: 'R$ 1.990', period: 'por evento', features: 'Internet via satélite 150 Mbps,Até 10 pontos de acesso Wi-Fi,Gerenciamento de rede em tempo real,Estabilidade garantida para pagamentos,Banco de baterias incluso,Suporte presencial no evento', badge_text: '★ Mais Popular', highlight_color: '#00FF88', is_featured: 1, cta_text: 'Contratar plano', cta_url: 'https://wa.me/5535988019507?text=Olá!%20Tenho%20interesse%20no%20Plano%20Professional%20para%20meu%20evento.', order_index: 1 },
         { name: 'Enterprise', description: 'Solução completa para grandes eventos e festivais acima de 1.000 pessoas', price: 'Sob consulta', period: 'personalizado', features: 'Internet via satélite dedicada ilimitada,Pontos de acesso ilimitados,NOC dedicado 24/7,Redundância de link automática,Banco de baterias de alta capacidade,Equipe técnica presencial completa,SLA 99.9% de uptime garantido', badge_text: 'Premium', highlight_color: '#0066FF', is_featured: 0, cta_text: 'Solicitar proposta', cta_url: 'https://wa.me/5535988019507?text=Olá!%20Gostaria%20de%20solicitar%20um%20orçamento%20para%20o%20Plano%20Enterprise.', order_index: 2 }
       ];
-
+ 
       // SQLite individual checks and updates for existing data
       for (const plan of initialPlans) {
-        const existing = db.prepare('SELECT id, cta_url FROM plans WHERE name = ?').get(plan.name) as any;
+        const existing = localDb.prepare('SELECT id, cta_url FROM plans WHERE name = ?').get(plan.name) as any;
         if (!existing) {
-          db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(plan.name, plan.description, plan.price, plan.period, plan.features, plan.badge_text, plan.highlight_color, plan.is_featured, plan.cta_text, plan.cta_url, plan.order_index);
+          localDb.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(plan.name, plan.description, plan.price, plan.period, plan.features, plan.badge_text, plan.highlight_color, plan.is_featured, plan.cta_text, plan.cta_url, plan.order_index);
         } else if (existing.cta_url === '#' || !existing.cta_url) {
-          db.prepare('UPDATE plans SET cta_url = ? WHERE id = ?').run(plan.cta_url, existing.id);
+          localDb.prepare('UPDATE plans SET cta_url = ? WHERE id = ?').run(plan.cta_url, existing.id);
         }
       }
 
@@ -527,6 +548,7 @@ const seedPageContent = async () => {
 
   const seedServices = async () => {
     try {
+      const localDb = getDb();
       const initialServices = [
         { title: 'Internet Dedicada', description: 'Link exclusivo para o seu evento, sem oscilações e com garantia de banda.', icon: 'Wifi', order_index: 0 },
         { title: 'Gerenciamento de Rede', description: 'Monitoramento em tempo real para garantir máxima segurança e performance.', icon: 'Activity', order_index: 1 },
@@ -534,12 +556,12 @@ const seedPageContent = async () => {
         { title: 'Banco de Baterias', description: 'Nobreaks de alta performance inclusos para garantir energia constante.', icon: 'Battery', order_index: 3 },
         { title: 'Suporte Presencial', description: 'Equipe técnica disponível durante todo o evento para garantir estabilidade.', icon: 'Headset', order_index: 4 }
       ];
-
+ 
       // SQLite individual checks
       for (const service of initialServices) {
-        const exists = db.prepare('SELECT id FROM services WHERE title = ?').get(service.title);
+        const exists = localDb.prepare('SELECT id FROM services WHERE title = ?').get(service.title);
         if (!exists) {
-          db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(service.title, service.description, service.icon, service.order_index);
+          localDb.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(service.title, service.description, service.icon, service.order_index);
         }
       }
 
@@ -668,7 +690,7 @@ async function startServer() {
       
       if (!user) {
         console.log(`[LOGIN] checking SQLite for user: ${username}`);
-        user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+        user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username);
       }
       
       if (!user) {
@@ -701,7 +723,7 @@ async function startServer() {
       if (error) return res.status(500).json({ message: error.message });
       user = data;
     } else {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
     }
     
     if (!user) return res.status(404).json({ message: 'Usuário não encontrado' });
@@ -727,7 +749,7 @@ async function startServer() {
       if (error) return res.status(500).json({ message: error.message });
       user = data;
     } else {
-      user = db.prepare('SELECT * FROM users WHERE username = ?').get(email);
+      user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(email);
     }
     
     if (!user) {
@@ -740,7 +762,7 @@ async function startServer() {
     if (supabase) {
       await supabase.from('users').update({ reset_token: resetToken, reset_token_expiry: expiry }).eq('id', user.id);
     } else {
-      db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?').run(resetToken, expiry, user.id);
+      getDb().prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?').run(resetToken, expiry, user.id);
     }
 
     const resetLink = `${req.headers.origin}/admin/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
@@ -783,7 +805,7 @@ async function startServer() {
       if (error) return res.status(500).json({ message: error.message });
       user = data;
     } else {
-      user = db.prepare('SELECT * FROM users WHERE username = ? AND reset_token = ?').get(email, token);
+      user = getDb().prepare('SELECT * FROM users WHERE username = ? AND reset_token = ?').get(email, token);
     }
     
     if (!user || user.reset_token_expiry < Date.now()) {
@@ -794,7 +816,7 @@ async function startServer() {
     if (supabase) {
       await supabase.from('users').update({ password_hash: hash, reset_token: null, reset_token_expiry: null }).eq('id', user.id);
     } else {
-      db.prepare('UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?').run(hash, user.id);
+      getDb().prepare('UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?').run(hash, user.id);
     }
     
     res.json({ success: true, message: 'Senha redefinida com sucesso.' });
@@ -807,7 +829,7 @@ async function startServer() {
       const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
       user = data;
     } else {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
     }
     
     const secret = generateSecret();
@@ -821,7 +843,7 @@ async function startServer() {
     if (supabase) {
       await supabase.from('users').update({ two_factor_secret: secret }).eq('id', userId);
     } else {
-      db.prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret, userId);
+      getDb().prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret, userId);
     }
     res.json({ qrCode, secret });
   });
@@ -835,7 +857,7 @@ async function startServer() {
       const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
       user = data;
     } else {
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
     }
     
     const { valid: isValid } = await verify({
@@ -848,7 +870,7 @@ async function startServer() {
     if (supabase) {
       await supabase.from('users').update({ two_factor_enabled: 1 }).eq('id', userId);
     } else {
-      db.prepare('UPDATE users SET two_factor_enabled = 1 WHERE id = ?').run(userId);
+      getDb().prepare('UPDATE users SET two_factor_enabled = 1 WHERE id = ?').run(userId);
     }
     res.json({ success: true });
   });
@@ -858,7 +880,7 @@ async function startServer() {
     if (supabase) {
       await supabase.from('users').update({ two_factor_enabled: 0, two_factor_secret: null }).eq('id', userId);
     } else {
-      db.prepare('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?').run(userId);
+      getDb().prepare('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?').run(userId);
     }
     res.json({ success: true });
   });
@@ -870,7 +892,7 @@ async function startServer() {
       const { data, error } = await supabase.from('users').select('id, username, two_factor_enabled').eq('id', userId).maybeSingle();
       user = data;
     } else {
-      user = db.prepare('SELECT id, username, two_factor_enabled FROM users WHERE id = ?').get(userId);
+      user = getDb().prepare('SELECT id, username, two_factor_enabled FROM users WHERE id = ?').get(userId);
     }
     res.json(user);
   });
@@ -903,7 +925,7 @@ async function startServer() {
       }
       
       if (!content) {
-        content = db.prepare('SELECT * FROM page_content').all();
+        content = getDb().prepare('SELECT * FROM page_content').all();
       }
       
       console.log(`[API] Returning content from ${source}`);
@@ -929,7 +951,7 @@ async function startServer() {
         .upsert({ section, key, value }, { onConflict: 'section,key' });
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(section, key, value);
+      getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(section, key, value);
     }
     res.json({ success: true });
   });
@@ -942,9 +964,9 @@ async function startServer() {
       const { error } = await supabase.from('page_content').upsert(updates, { onConflict: 'section,key' });
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      const transaction = db.transaction((items) => {
+      const transaction = getDb().transaction((items) => {
         for (const item of items) {
-          db.prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(item.section, item.key, item.value);
+          getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(item.section, item.key, item.value);
         }
       });
       transaction(updates);
@@ -967,7 +989,7 @@ async function startServer() {
       }
       
       if (!plans) {
-        plans = db.prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
+        plans = getDb().prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
       }
       
       console.log(`[API] Returning ${plans.length} plans from ${source}`);
@@ -986,7 +1008,7 @@ async function startServer() {
         const { error } = await supabase.from('plan_clicks').insert({ plan_id: id, day_of_week: dayOfWeek });
         if (error) throw error;
       } else {
-        db.prepare('INSERT INTO plan_clicks (plan_id, day_of_week) VALUES (?, ?)').run(id, dayOfWeek);
+        getDb().prepare('INSERT INTO plan_clicks (plan_id, day_of_week) VALUES (?, ?)').run(id, dayOfWeek);
       }
       res.json({ success: true });
     } catch (error) {
@@ -1014,7 +1036,7 @@ async function startServer() {
       });
       stats = Object.keys(counts).map(key => ({ day_of_week: parseInt(key), count: counts[key] }));
     } else {
-      stats = db.prepare(`
+      stats = getDb().prepare(`
         SELECT 
           day_of_week, 
           COUNT(*) as count 
@@ -1047,7 +1069,7 @@ async function startServer() {
       }
       
       if (!services) {
-        services = db.prepare('SELECT * FROM services ORDER BY order_index ASC').all();
+        services = getDb().prepare('SELECT * FROM services ORDER BY order_index ASC').all();
       }
       
       console.log(`[API] Returning ${services.length} services from ${source}`);
@@ -1063,7 +1085,7 @@ async function startServer() {
       const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
+      getDb().prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
     }
     res.json({ success: true });
   });
@@ -1075,7 +1097,7 @@ async function startServer() {
       const { error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
+      getDb().prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
     }
     res.json({ success: true });
   });
@@ -1086,7 +1108,7 @@ async function startServer() {
       const { error } = await supabase.from('services').delete().eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('DELETE FROM services WHERE id = ?').run(id);
+      getDb().prepare('DELETE FROM services WHERE id = ?').run(id);
     }
     res.json({ success: true });
   });
@@ -1097,7 +1119,7 @@ async function startServer() {
       const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
+      getDb().prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
     }
     res.json({ success: true });
   });
@@ -1109,7 +1131,7 @@ async function startServer() {
       const { error } = await supabase.from('plans').update({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index, budget_text }).eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
+      getDb().prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
     }
     res.json({ success: true });
   });
@@ -1120,7 +1142,7 @@ async function startServer() {
       const { error } = await supabase.from('plans').delete().eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('DELETE FROM plans WHERE id = ?').run(id);
+      getDb().prepare('DELETE FROM plans WHERE id = ?').run(id);
     }
     res.json({ success: true });
   });
@@ -1129,37 +1151,42 @@ async function startServer() {
   api.get('/admin/customers', authenticate, async (req, res) => {
     if (supabase) {
       console.log('[CUSTOMER] Fetching customers from Supabase');
-      // Use a safe select first to avoid schema cache issues with newly added columns
-      const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-      
-      if (error) {
-        console.error('[CUSTOMER] Supabase fetch error:', error.message);
+      // Fix: Specifically handle PostgREST schema cache issues with fallback logic
+      try {
+        const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
         
-        // Self-healing: if column not found in cache or other schema error
-        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
-          console.warn('[CUSTOMER] Fetching only basic columns due to schema error...');
-          const { data: fallbackData, error: fallbackError } = await supabase
-            .from('customers')
-            .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
-            .order('created_at', { ascending: false });
+        if (error) {
+          console.error('[CUSTOMER] Supabase fetch error:', error.message);
+          
+          // Self-healing: try fetching only known safe columns if event_name is missing in cache
+          if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+            console.warn('[CUSTOMER] Schema mismatch detected, performing fallback fetch...');
+            // Try without event_name first
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from('customers')
+              .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
+              .order('created_at', { ascending: false });
+              
+            if (!fallbackError) return res.json(fallbackData);
             
-          if (fallbackError) {
-             console.warn('[CUSTOMER] Fallback fetch failed, trying minimal...');
-             const { data: minimalData, error: minimalError } = await supabase
+            // If that fails, try truly minimal
+            const { data: minimalData, error: minimalError } = await supabase
               .from('customers')
               .select('id, name, location, event_date, budget, cost, status, plan_id, created_at')
               .order('created_at', { ascending: false });
-             if (minimalError) return res.status(500).json({ message: minimalError.message });
-             return res.json(minimalData);
+            
+            if (minimalError) return res.status(500).json({ message: minimalError.message });
+            return res.json(minimalData);
           }
-          return res.json(fallbackData);
+          return res.status(500).json({ message: error.message });
         }
-        
-        return res.status(500).json({ message: error.message });
+        return res.json(data);
+      } catch (err: any) {
+        console.error('[CUSTOMER] Fetch exception:', err);
+        return res.status(500).json({ message: err.message });
       }
-      res.json(data);
     } else {
-      const customers = db.prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
+      const customers = getDb().prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
       res.json(customers);
     }
   });
@@ -1167,23 +1194,22 @@ async function startServer() {
   api.get('/admin/customers/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     if (supabase) {
-      const { data, error } = await supabase.from('customers').select('*').eq('id', id).maybeSingle();
-      if (error) {
-        // Fallback for single record fetch
-        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
-           const { data: fallbackData, error: fallbackError } = await supabase
-            .from('customers')
-            .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
-            .eq('id', id)
-            .maybeSingle();
-           if (fallbackError) return res.status(500).json({ message: fallbackError.message });
-           return res.json(fallbackData);
+      try {
+        const { data, error } = await supabase.from('customers').select('*').eq('id', id).maybeSingle();
+        if (error) {
+          if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema')) {
+            const { data: fallback, error: fallbackErr } = await supabase.from('customers').select('id, name, location, event_date, budget, cost, status, plan_id, created_at').eq('id', id).maybeSingle();
+            if (fallbackErr) return res.status(500).json({ message: fallbackErr.message });
+            return res.json(fallback);
+          }
+          return res.status(500).json({ message: error.message });
         }
-        return res.status(500).json({ message: error.message });
+        res.json(data);
+      } catch (err: any) {
+        res.status(500).json({ message: err.message });
       }
-      res.json(data);
     } else {
-      const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+      const customer = getDb().prepare('SELECT * FROM customers WHERE id = ?').get(id);
       res.json(customer || null);
     }
   });
@@ -1230,7 +1256,7 @@ async function startServer() {
         return res.status(500).json({ message: error.message });
       }
     } else {
-      db.prepare('INSERT INTO customers (name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      getDb().prepare('INSERT INTO customers (name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         name, event_name, location, event_date, numericBudget, numericCost, status || 'Pendente', start_date, end_date, phone, email, numericPlanId
       );
     }
@@ -1278,7 +1304,7 @@ async function startServer() {
         return res.status(500).json({ message: error.message });
       }
     } else {
-      db.prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
+      getDb().prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
         name, event_name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
       );
     }
@@ -1293,7 +1319,7 @@ async function startServer() {
       const { error } = await supabase.from('customers').delete().eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+      getDb().prepare('DELETE FROM customers WHERE id = ?').run(id);
     }
     res.json({ success: true });
   });
@@ -1305,7 +1331,7 @@ async function startServer() {
       if (error) return res.status(500).json({ message: error.message });
       res.json(data);
     } else {
-      const items = db.prepare('SELECT * FROM inventory ORDER BY created_at DESC').all();
+      const items = getDb().prepare('SELECT * FROM inventory ORDER BY created_at DESC').all();
       res.json(items);
     }
   });
@@ -1317,7 +1343,7 @@ async function startServer() {
       const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status: status || 'Ativo' });
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
+      getDb().prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
     }
     res.json({ success: true });
   });
@@ -1330,7 +1356,7 @@ async function startServer() {
       const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status }).eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status, id);
+      getDb().prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status, id);
     }
     res.json({ success: true });
   });
@@ -1341,7 +1367,7 @@ async function startServer() {
       const { error } = await supabase.from('inventory').delete().eq('id', id);
       if (error) return res.status(500).json({ message: error.message });
     } else {
-      db.prepare('DELETE FROM inventory WHERE id = ?').run(id);
+      getDb().prepare('DELETE FROM inventory WHERE id = ?').run(id);
     }
     res.json({ success: true });
   });
@@ -1386,6 +1412,7 @@ async function startServer() {
     }
     
     // Seed data
+    initSqliteTables();
     seedUsers();
     seedPageContent();
     seedPlans();
