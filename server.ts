@@ -3,7 +3,6 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import Database from 'better-sqlite3';
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -14,6 +13,18 @@ import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// Dynamic import for better-sqlite3 to prevent crash in environments without native build support
+let Database: any;
+try {
+  // Use a dynamic import for better-sqlite3. In some serverless environments, 
+  // the precompiled binary might not be compatible.
+  const { default: DB } = await import('better-sqlite3');
+  Database = DB;
+  console.log('better-sqlite3 loaded successfully.');
+} catch (err) {
+  console.warn('better-sqlite3 could not be loaded. Falling back to mock database.', err);
+}
 
 console.log('=== SERVER STARTUP ===');
 console.log('NODE_ENV:', process.env.NODE_ENV);
@@ -182,16 +193,28 @@ let db: any = null;
 function getDb() {
   if (!db) {
     try {
-      db = new Database('database.sqlite');
+      const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+      const dbPath = isVercel ? '/tmp/database.sqlite' : 'database.sqlite';
+      
+      if (!Database) {
+        throw new Error('Database (better-sqlite3) not loaded');
+      }
+
+      db = new Database(dbPath);
       db.pragma('journal_mode = WAL');
-      console.log('SQLite database initialized.');
+      console.log(`SQLite database initialized at ${dbPath}.`);
     } catch (err) {
       console.warn('Failed to initialize SQLite. This is expected on some serverless environments if Supabase is active.', err);
-      // Create a mock or null db that throws on use if needed
+      // Create a mock db that returns empty results instead of crashing
       db = {
-        prepare: () => ({ all: () => [], get: () => null, run: () => ({}) }),
+        prepare: () => ({ 
+          all: () => [], 
+          get: () => null, 
+          run: () => ({ lastInsertRowid: 0, changes: 0 }) 
+        }),
         exec: () => ({}),
-        pragma: () => ({})
+        pragma: () => ({}),
+        transaction: (fn: any) => fn
       };
     }
   }
@@ -1402,33 +1425,49 @@ async function startServer() {
   console.log('Registering routes...');
 
   const initLogic = async () => {
-    // Initialize Supabase in the background
+    console.log('Starting background initialization...');
     try {
-      const client = await initSupabase();
-      supabase = client;
-      console.log('Supabase background initialization finished.');
+      // Initialize Supabase in the background
+      try {
+        const client = await initSupabase();
+        supabase = client;
+        console.log(`Supabase background initialization finished. Active: ${!!supabase}`);
+      } catch (err) {
+        console.error('Supabase background initialization failed:', err);
+      }
+      
+      // Initialize SQLite tables safely
+      try {
+        initSqliteTables();
+      } catch (err) {
+        console.error('SQLite table initialization failed:', err);
+      }
+
+      // Seed data safely
+      try {
+        await seedUsers();
+        await seedPageContent();
+        await seedPlans();
+        await seedServices();
+        console.log('Seeding finished.');
+      } catch (err) {
+        console.error('Seeding background tasks failed:', err);
+      }
     } catch (err) {
-      console.error('Supabase background initialization failed:', err);
+      console.error('Global initLogic error:', err);
     }
-    
-    // Seed data
-    initSqliteTables();
-    seedUsers();
-    seedPageContent();
-    seedPlans();
-    seedServices();
   };
 
   if (process.env.VERCEL === '1' || !!process.env.VERCEL) {
     console.log('Vercel environment detected. Skipping listen but initializing background tasks.');
-    initLogic();
+    initLogic().catch(err => console.error('initLogic background error:', err));
     return;
   }
 
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log('Routes registered and server is listening.');
-    initLogic();
+    initLogic().catch(err => console.error('initLogic background error:', err));
   });
 }
 
