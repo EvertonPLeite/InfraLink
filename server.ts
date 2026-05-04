@@ -1034,19 +1034,19 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
       let source = 'SQLite';
       if (supabase) {
         const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           plans = data;
           source = 'Supabase';
         } else if (error) {
-          console.warn('Supabase plans fetch failed, falling back to SQLite:', error.message);
+          console.warn('Supabase plans fetch failed:', error.message);
         }
       }
       
-      if (!plans) {
+      if (plans === undefined) {
         plans = getDb().prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
       }
       
-      console.log(`[API] Returning ${plans.length} plans from ${source}`);
+      console.log(`[API] Returning ${plans?.length || 0} plans from ${source}`);
       res.json(plans || []);
     } catch (err: any) {
       console.error('Error fetching plans:', err);
@@ -1114,19 +1114,19 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
       let source = 'SQLite';
       if (supabase) {
         const { data, error } = await supabase.from('services').select('*').order('order_index', { ascending: true });
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           services = data;
           source = 'Supabase';
         } else if (error) {
-          console.warn('Supabase services fetch failed, falling back to SQLite:', error.message);
+          console.warn('Supabase services fetch failed:', error.message);
         }
       }
       
-      if (!services) {
+      if (services === undefined) {
         services = getDb().prepare('SELECT * FROM services ORDER BY order_index ASC').all();
       }
       
-      console.log(`[API] Returning ${services.length} services from ${source}`);
+      console.log(`[API] Returning ${services?.length || 0} services from ${source}`);
       res.json(services || []);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -1160,8 +1160,9 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
     if (supabase) {
-      const { error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id);
+      const { data, error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id).select();
       if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Serviço não encontrado no Supabase.' });
       return res.json({ success: true });
     }
     
@@ -1205,12 +1206,27 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
   api.put('/admin/plans/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
-      const { error } = await supabase.from('plans').update({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index, budget_text }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
+      const { data, error } = await supabase
+        .from('plans')
+        .update({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index, budget_text })
+        .eq('id', id)
+        .select();
+      
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) {
+        return res.status(404).json({ message: 'Plano não encontrado no Supabase. O ID pode ser diferente do SQLite.' });
+      }
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
     res.json({ success: true });
   });
 
@@ -1359,7 +1375,7 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
         plan_id: numericPlanId 
       };
 
-      const { error } = await supabase.from('customers').update(payload).eq('id', id);
+      const { data, error } = await supabase.from('customers').update(payload).eq('id', id).select();
       
       if (error) {
         console.error('[CUSTOMER] Supabase update error:', error.message);
@@ -1374,13 +1390,16 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
             status, 
             plan_id: numericPlanId 
           };
-          const { error: fallbackError } = await supabase.from('customers').update(fallbackPayload).eq('id', id);
-          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers' (event_name, phone, email, start_date, end_date) and refresh schema cache.` });
+          const { data: fbData, error: fallbackError } = await supabase.from('customers').update(fallbackPayload).eq('id', id).select();
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}.` });
+          if (!fbData || fbData.length === 0) return res.status(404).json({ message: 'Cliente não encontrado no Supabase (fallback).' });
           return res.json({ success: true, warning: 'Updated without some fields due to schema mismatch.' });
         }
         
-        return res.status(500).json({ message: error.message });
+        return res.status(500).json({ message: `Supabase Error: ${error.message}` });
       }
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Cliente não encontrado no Supabase.' });
+      return res.json({ success: true });
     } else {
       getDb().prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
         name, event_name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
@@ -1420,17 +1439,17 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
     if (supabase) {
-      const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status: status || 'Ativo' });
+      const { data, error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status: status || 'Ativo' }).select();
       if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
-      return res.json({ success: true });
+      return res.json({ success: true, id: data?.[0]?.id });
     }
     
     if (isVercel) {
       return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
-    getDb().prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
-    res.json({ success: true });
+    const result = getDb().prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
+    res.json({ success: true, id: result.lastInsertRowid });
   });
 
   api.put('/admin/inventory/:id', authenticate, async (req, res) => {
@@ -1440,8 +1459,9 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
     if (supabase) {
-      const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status }).eq('id', id);
+      const { data, error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status }).eq('id', id).select();
       if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Item não encontrado no Supabase.' });
       return res.json({ success: true });
     }
     
@@ -1458,8 +1478,9 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
     if (supabase) {
-      const { error } = await supabase.from('inventory').delete().eq('id', id);
+      const { data, error } = await supabase.from('inventory').delete().eq('id', id).select();
       if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Item não encontrado no Supabase.' });
       return res.json({ success: true });
     }
     
@@ -1519,13 +1540,39 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
         console.error('SQLite table initialization failed:', err);
       }
 
-      // Seed data safely
+      // Seed data safely & Sync
       try {
         await seedUsers();
         await seedPageContent();
         await seedPlans();
         await seedServices();
-        console.log('Seeding finished.');
+
+        // One-way sync for Customers and Inventory if Supabase is active
+        if (supabase) {
+           console.log('Checking if customers need sync to Supabase...');
+           const { data: supCustomers, error: supErr } = await supabase.from('customers').select('id').limit(1);
+           if (!supErr && (!supCustomers || supCustomers.length === 0)) {
+              console.log('Supabase customers table is empty. Syncing from SQLite...');
+              const localCustomers = getDb().prepare('SELECT * FROM customers').all();
+              if (localCustomers.length > 0) {
+                 const { error: syncErr } = await supabase.from('customers').insert(localCustomers);
+                 if (syncErr) console.error('Failed to sync customers to Supabase:', syncErr.message);
+              }
+           }
+
+           console.log('Checking if inventory needs sync to Supabase...');
+           const { data: supInv, error: invErr } = await supabase.from('inventory').select('id').limit(1);
+           if (!invErr && (!supInv || supInv.length === 0)) {
+              console.log('Supabase inventory table is empty. Syncing from SQLite...');
+              const localInv = getDb().prepare('SELECT * FROM inventory').all();
+              if (localInv.length > 0) {
+                 const { error: syncErr } = await supabase.from('inventory').insert(localInv);
+                 if (syncErr) console.error('Failed to sync inventory to Supabase:', syncErr.message);
+              }
+           }
+        }
+
+        console.log('Seeding and Syncing finished.');
       } catch (err) {
         console.error('Seeding background tasks failed:', err);
       }

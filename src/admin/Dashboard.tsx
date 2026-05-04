@@ -2266,28 +2266,49 @@ export default function Dashboard() {
       {/* Content */}
       <main className="flex-grow p-8 md:p-16 h-screen overflow-y-auto relative z-10">
          <div className="max-w-4xl mx-auto">
-            {systemStatus && systemStatus.isVercel && !systemStatus.supabase?.active && (
-              <div className="mb-8 p-6 bg-red-500/10 border border-red-500/30 rounded-3xl flex items-start gap-4 animate-in fade-in slide-in-from-top duration-700">
-                <div className="p-3 bg-red-500/20 rounded-2xl text-red-500">
-                  <Database size={24} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-red-500 mb-1">Atenção: Banco de Dados Não Persistente</h3>
-                  <p className="text-white/60 text-sm leading-relaxed mb-3">
-                    O Supabase não foi detectado ou configurado. Em modo produção (Vercel), as alterações que você fizer serão **perdidas** assim que o servidor reiniciar.
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Erro de persistência</span>
-                    <span className="text-[10px] text-white/30 italic">Verifique as variáveis SUPABASE_URL e SUPABASE_ANON_KEY no Vercel.</span>
+            {/* Supabase Sync Status Indicator */}
+            {systemStatus && (
+              <div className="mb-12">
+                {!systemStatus.supabase?.active ? (
+                  <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-[2rem] flex flex-col md:flex-row items-center gap-6 animate-in fade-in slide-in-from-top duration-700">
+                    <div className="p-4 bg-red-500/20 rounded-2xl text-red-500">
+                      <Database size={32} />
+                    </div>
+                    <div className="flex-grow text-center md:text-left">
+                      <h3 className="text-lg font-bold text-red-500 mb-1">Banco de Dados Offline</h3>
+                      <p className="text-white/60 text-xs leading-relaxed">
+                        As alterações serão perdidas após reiniciar o servidor. Configure o Supabase para persistir seus dados.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 min-w-[200px]">
+                      <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-white/40">
+                         <span>URL:</span>
+                         <span className={systemStatus.supabase?.url !== 'not-set' ? 'text-green-500' : 'text-red-500'}>
+                           {systemStatus.supabase?.url !== 'not-set' ? 'Definida' : 'Ausente'}
+                         </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-white/40">
+                         <span>Anon Key:</span>
+                         <span className={systemStatus.supabase?.hasAnonKey ? 'text-green-500' : 'text-red-500'}>
+                           {systemStatus.supabase?.hasAnonKey ? 'Definida' : 'Ausente'}
+                         </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {systemStatus && systemStatus.supabase?.active && (
-              <div className="mb-8 p-4 bg-brand-neon/5 border border-brand-neon/10 rounded-2xl flex items-center gap-3">
-                <div className="w-2 h-2 bg-brand-neon rounded-full animate-pulse shadow-[0_0_8px_rgba(0,255,136,0.5)]" />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon/60">Cloud Sync Ativo: Supabase Conectado</span>
+                ) : (
+                  <div className="p-4 bg-brand-neon/5 border border-brand-neon/20 rounded-2xl flex items-center justify-between gap-4 group hover:bg-brand-neon/10 transition-all">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2.5 h-2.5 bg-brand-neon rounded-full animate-pulse shadow-[0_0_12px_rgba(0,255,136,0.6)]" />
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon">Cloud Sync Ativo</span>
+                        <p className="text-[9px] text-white/30 font-medium tracking-tight">Os dados estão sendo sincronizados com o Supabase com segurança.</p>
+                      </div>
+                    </div>
+                    <div className="p-2 bg-brand-neon/10 rounded-lg text-brand-neon group-hover:scale-110 transition-transform">
+                      <Shield size={14} />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
