@@ -11,7 +11,6 @@ import ResetPassword from './admin/ResetPassword';
 import { Instagram } from 'lucide-react';
 import { safeFetch } from './lib/fetch';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ToastProvider } from './lib/ToastContext';
 
 function LandingPage() {
   const [content, setContent] = useState<any>(null);
@@ -80,23 +79,21 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary>
-      <ToastProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/admin/login" element={<Login />} />
-            <Route path="/admin/reset-password" element={<ResetPassword />} />
-            <Route 
-              path="/admin/dashboard/*" 
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } 
-            />
-          </Routes>
-        </BrowserRouter>
-      </ToastProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/admin/login" element={<Login />} />
+          <Route path="/admin/reset-password" element={<ResetPassword />} />
+          <Route 
+            path="/admin/dashboard/*" 
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+        </Routes>
+      </BrowserRouter>
     </ErrorBoundary>
   );
 }

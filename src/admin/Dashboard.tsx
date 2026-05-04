@@ -120,7 +120,6 @@ import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, PieChart, Pie } from 'recharts';
 import { safeFetch } from '../lib/fetch';
-import { useToast } from '../lib/ToastContext';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -312,7 +311,7 @@ function ManageCustomers() {
     })
       .then(data => setInventory(Array.isArray(data) ? data : []))
       .catch(err => {
-        showToast(err.message || 'Erro ao buscar inventário', 'error');
+        console.error('Error fetching inventory for summary:', err);
         setInventory([]);
       });
   };
@@ -326,7 +325,7 @@ function ManageCustomers() {
         setLoading(false);
       })
       .catch(err => {
-        showToast(err.message || 'Erro ao buscar clientes', 'error');
+        console.error('Error fetching customers:', err);
         setCustomers([]);
         setLoading(false);
       });
@@ -336,7 +335,7 @@ function ManageCustomers() {
     safeFetch('/api/plans')
       .then(data => setPlans(Array.isArray(data) ? data : []))
       .catch(err => {
-        showToast(err.message || 'Erro ao buscar planos', 'error');
+        console.error('Error fetching plans:', err);
         setPlans([]);
       });
   };
@@ -352,7 +351,7 @@ function ManageCustomers() {
     const token = localStorage.getItem('token');
     
     if (!token) {
-      showToast('Sessão expirada. Por favor, faça login novamente.', 'warning');
+      alert('Sessão expirada. Por favor, faça login novamente.');
       return;
     }
     
@@ -362,11 +361,12 @@ function ManageCustomers() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      showToast('Cliente excluído com sucesso!', 'success');
+      console.log('Frontend: Exclusão bem-sucedida');
       setDeletingId(null);
       fetchCustomers();
     } catch (error: any) {
-      showToast(error.message || 'Erro ao excluir cliente', 'error');
+      console.error('Frontend: Erro ao excluir cliente:', error);
+      alert(`Erro ao excluir cliente: ${error.message || 'Erro desconhecido'}`);
     }
   };
 
@@ -393,14 +393,14 @@ function ManageCustomers() {
       });
 
       if (response && (response as any).warning) {
-        showToast(`Aviso: ${(response as any).warning}`, 'warning');
+        alert(`Aviso: ${(response as any).warning}`);
       }
 
-      showToast(`Cliente ${editingCustomer?.id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
       setEditingCustomer(null);
       fetchCustomers();
     } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar cliente', 'error');
+      console.error('Error saving customer:', err);
+      alert(`Erro ao salvar cliente: ${err.message}`);
     }
   };
 
@@ -1013,7 +1013,8 @@ function EditContent() {
       setSuccessSection(section);
       setTimeout(() => setSuccessSection(null), 3000);
     } catch (error: any) {
-      showToast(error.message || 'Erro ao salvar seção', 'error');
+      console.error('Error saving section:', error);
+      alert(`Erro ao salvar seção: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -1254,7 +1255,8 @@ function ManagePlans() {
       setDeletingId(null);
       fetchPlans();
     } catch (error: any) {
-      showToast(error.message || 'Erro ao excluir plano', 'error');
+      console.error('Delete plan error:', error);
+      alert(`Erro ao excluir plano: ${error.message}`);
     }
   };
 
@@ -1286,11 +1288,11 @@ function ManagePlans() {
         body: JSON.stringify(data)
       });
 
-      showToast(`Plano ${editingPlan?.id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
       setEditingPlan(null);
       fetchPlans();
     } catch (error: any) {
-      showToast(error.message || 'Erro ao salvar plano', 'error');
+      console.error('Save plan error:', error);
+      alert(`Erro ao salvar plano: ${error.message || 'Verifique os dados'}`);
     } finally {
       setSaving(false);
     }
@@ -1529,7 +1531,8 @@ function SecuritySettings() {
       });
       setSetupData(data);
     } catch (err: any) {
-      showToast(err.message || 'Erro ao configurar 2FA', 'error');
+      console.error('2FA setup error:', err);
+      alert(`Erro ao configurar 2FA: ${err.message}`);
     }
   };
 
@@ -1559,7 +1562,8 @@ function SecuritySettings() {
       setIsConfirmingDisable(false);
       fetchUser();
     } catch (err: any) {
-      showToast(err.message || 'Erro ao desativar 2FA', 'error');
+      console.error('2FA disable error:', err);
+      alert(`Erro ao desativar 2FA: ${err.message}`);
     }
   };
 
@@ -1708,11 +1712,11 @@ function ManageServices() {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      showToast('Serviço excluído com sucesso!', 'success');
       setDeletingId(null);
       fetchServices();
     } catch (error: any) {
-      showToast(error.message || 'Erro ao excluir serviço', 'error');
+      console.error('Delete service error:', error);
+      alert(`Erro ao excluir serviço: ${error.message}`);
     }
   };
 
@@ -1736,11 +1740,11 @@ function ManageServices() {
         body: JSON.stringify(payload)
       });
 
-      showToast(`Serviço ${editingService?.id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
       setEditingService(null);
       fetchServices();
     } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar serviço', 'error');
+      console.error('Save service error:', err);
+      alert(`Erro ao salvar serviço: ${err.message}`);
     }
   };
 
@@ -1924,11 +1928,11 @@ function ManageInventory() {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      showToast('Item excluído com sucesso!', 'success');
       setDeletingId(null);
       fetchItems();
     } catch (error: any) {
-      showToast(error.message || 'Erro ao excluir item', 'error');
+      console.error('Delete inventory error:', error);
+      alert(`Erro ao excluir item: ${error.message}`);
     }
   };
 
@@ -1952,11 +1956,11 @@ function ManageInventory() {
         body: JSON.stringify(data)
       });
 
-      showToast(`Item ${editingItem?.id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
       setEditingItem(null);
       fetchItems();
     } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar item', 'error');
+      console.error('Save item error:', err);
+      alert(`Erro ao salvar item: ${err.message}`);
     }
   };
 
@@ -2191,7 +2195,6 @@ function DashboardHome() {
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { showToast } = useToast();
   const [systemStatus, setSystemStatus] = useState<any>(null);
 
   useEffect(() => {
@@ -2199,7 +2202,7 @@ export default function Dashboard() {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
     })
       .then(status => setSystemStatus(status))
-      .catch(err => showToast(err.message || 'Erro ao carregar status', 'error'));
+      .catch(err => console.error('Status check failed:', err));
   }, []);
 
   const handleLogout = () => {
@@ -2274,7 +2277,7 @@ export default function Dashboard() {
                     <div className="flex-grow text-center md:text-left">
                       <h3 className="text-lg font-bold text-red-500 mb-1">Banco de Dados Offline</h3>
                       <p className="text-white/60 text-xs leading-relaxed">
-                        As alterações de conteúdo e planos serão perdidas após reiniciar o servidor se o Supabase não estiver configurado.
+                        As alterações serão perdidas após reiniciar o servidor. Configure o Supabase para persistir seus dados.
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 min-w-[200px]">
@@ -2285,9 +2288,9 @@ export default function Dashboard() {
                          </span>
                       </div>
                       <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-white/40">
-                         <span>Keys:</span>
+                         <span>Anon Key:</span>
                          <span className={systemStatus.supabase?.hasAnonKey ? 'text-green-500' : 'text-red-500'}>
-                           {systemStatus.supabase?.hasAnonKey ? 'Ok' : 'Ausentes'}
+                           {systemStatus.supabase?.hasAnonKey ? 'Definida' : 'Ausente'}
                          </span>
                       </div>
                     </div>
@@ -2298,7 +2301,7 @@ export default function Dashboard() {
                       <div className="w-2.5 h-2.5 bg-brand-neon rounded-full animate-pulse shadow-[0_0_12px_rgba(0,255,136,0.6)]" />
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon">Cloud Sync Ativo</span>
-                        <p className="text-[9px] text-white/30 font-medium tracking-tight">Dados sincronizados com o Supabase com segurança.</p>
+                        <p className="text-[9px] text-white/30 font-medium tracking-tight">Os dados estão sendo sincronizados com o Supabase com segurança.</p>
                       </div>
                     </div>
                     <div className="p-2 bg-brand-neon/10 rounded-lg text-brand-neon group-hover:scale-110 transition-transform">

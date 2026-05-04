@@ -138,6 +138,10 @@ async function initSupabase() {
     });
 
     console.log(`Verifying Supabase connection using ${keyType} key...`);
+    console.log(`Verifying Supabase connection for URL: ${SUPABASE_URL}`);
+    console.log(`- Key source: ${keyType === 'service_role' ? 'SUPABASE_SERVICE_ROLE_KEY' : 'SUPABASE_KEY'}`);
+    console.log(`- Key length: ${keyToUse!.length}`);
+    console.log(`- Key prefix: ${keyToUse!.substring(0, 5)}...`);
     
     // We try to fetch from 'plans' to verify the key. 
     // If the key is invalid, Supabase returns a 401/403.
@@ -149,13 +153,31 @@ async function initSupabase() {
         console.error('***************************************************');
         console.error(`SUPABASE ERROR: ${error.message}`);
         console.error(`Attempted with ${keyType} key on URL: ${SUPABASE_URL}`);
-        console.error('Please check your environment variables in Settings.');
+        console.error('Please check your environment variables in Settings:');
+        console.error('- NEXT_PUBLIC_SUPABASE_URL');
+        console.error('- NEXT_PUBLIC_SUPABASE_ANON_KEY (starts with eyJ...)');
+        console.error('- SUPABASE_SERVICE_ROLE_KEY (optional, starts with eyJ...)');
         console.error('***************************************************');
+        
+        // If we tried service_role and it failed, try anon as last resort for verification
+        if (keyType === 'service_role') {
+          console.log('Retrying verification with anon key...');
+          const anonClient = createClient(SUPABASE_URL!, SUPABASE_KEY!, { auth: { persistSession: false } });
+          const { error: anonError } = await anonClient.from('plans').select('id').limit(1);
+          if (!anonError) {
+            console.log('Verification succeeded with anon key but failed with service_role.');
+            return anonClient;
+          } else {
+            console.error(`Verification also failed with anon key: ${anonError.message}`);
+          }
+        }
         return null;
       }
       
       // If the error is "relation does not exist" or similar, the key is likely VALID but the table is missing.
+      // We return the client so the app stays in Supabase mode and can try to seed or report errors correctly.
       console.log(`Supabase verification returned non-auth error (likely missing table): ${error.message} (Code: ${error.code}). Key is likely valid.`);
+      return client;
     }
     
     console.log(`Supabase connection verified successfully using ${keyType} key`);
@@ -182,7 +204,7 @@ function getDb() {
       db.pragma('journal_mode = WAL');
       console.log(`SQLite database initialized at ${dbPath}.`);
     } catch (err) {
-      console.warn('Failed to initialize SQLite. Using mock database.', err);
+      console.warn('Failed to initialize SQLite. This is expected on some serverless environments if Supabase is active.', err);
       // Create a mock db that returns empty results instead of crashing
       db = {
         prepare: () => ({ 
@@ -517,6 +539,7 @@ const seedPageContent = async () => {
 
       if (supabase) {
         console.log('Checking plans in Supabase...');
+
         const { data: existingSupabasePlans, error: checkError } = await supabase.from('plans').select('id, name, cta_url').order('id', { ascending: true });
         
         if (checkError) {
@@ -596,14 +619,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', api);
 
 async function startServer() {
-  supabase = await initSupabase();
-
-  initSqliteTables();
-  await seedUsers();
-  await seedPageContent();
-  await seedPlans();
-  await seedServices();
-
   // 2. Logging Middleware
   app.use((req, res, next) => {
     const isViteRequest = req.url.startsWith('/@') || req.url.startsWith('/node_modules') || req.url.includes('?v=') || req.url.includes('?t=');
@@ -628,7 +643,8 @@ async function startServer() {
       status: 'ok',
       env: process.env.NODE_ENV,
       cwd: process.cwd(),
-      time: new Date().toISOString()
+      time: new Date().toISOString(),
+      supabase: !!supabase
     });
   });
 
@@ -685,8 +701,20 @@ async function startServer() {
         return res.status(400).json({ message: 'Usuário e senha são obrigatórios' });
       }
 
-      console.log(`[LOGIN] checking SQLite for user: ${username}`);
-      const user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username);
+      let user;
+      if (supabase) {
+        console.log(`[LOGIN] checking Supabase for user: ${username}`);
+        const { data, error } = await supabase.from('users').select('*').eq('username', username).maybeSingle();
+        if (error) {
+          console.error('[LOGIN] Supabase error:', error.message);
+        }
+        user = data;
+      }
+      
+      if (!user) {
+        console.log(`[LOGIN] checking SQLite for user: ${username}`);
+        user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username);
+      }
       
     if (!user) {
       console.log(`Login failed: user ${username} not found`);
@@ -719,15 +747,15 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const status = {
       environment: process.env.NODE_ENV,
       isVercel,
+      supabase: {
+        active: !!supabase,
+        url: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : 'not-set',
+        hasAnonKey: !!SUPABASE_KEY,
+        hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY
+      },
       sqlite: {
         type: Database ? 'native (better-sqlite3)' : 'mock (memory-only)',
         path: isVercel ? '/tmp/database.sqlite' : 'database.sqlite'
-      },
-      supabase: {
-        active: !!supabase,
-        url: SUPABASE_URL || 'not-set',
-        hasAnonKey: !!SUPABASE_KEY,
-        hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY
       },
       time: new Date().toISOString()
     };
@@ -742,7 +770,14 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.post('/auth/verify-2fa', async (req, res) => {
     const { userId, code } = req.body;
-    const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    let user;
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+      if (error) return res.status(500).json({ message: error.message });
+      user = data;
+    } else {
+      user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    }
     
     if (!user) return res.status(404).json({ message: 'Usuário não encontrado' });
     
@@ -761,7 +796,14 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const { email } = req.body;
     console.log(`Solicitação de recuperação de senha para: ${email}`);
     
-    const user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(email);
+    let user;
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('*').eq('username', email).maybeSingle();
+      if (error) return res.status(500).json({ message: error.message });
+      user = data;
+    } else {
+      user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(email);
+    }
     
     if (!user) {
       return res.json({ success: true, message: 'Se o e-mail estiver cadastrado, você receberá instruções de recuperação.' });
@@ -770,7 +812,11 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const resetToken = crypto.randomBytes(32).toString('hex');
     const expiry = Date.now() + 3600000;
 
-    getDb().prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?').run(resetToken, expiry, user.id);
+    if (supabase) {
+      await supabase.from('users').update({ reset_token: resetToken, reset_token_expiry: expiry }).eq('id', user.id);
+    } else {
+      getDb().prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?').run(resetToken, expiry, user.id);
+    }
 
     const resetLink = `${req.headers.origin}/admin/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
     
@@ -806,21 +852,38 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
   api.post('/auth/reset-password', async (req, res) => {
     const { email, token, newPassword } = req.body;
     
-    const user = getDb().prepare('SELECT * FROM users WHERE username = ? AND reset_token = ?').get(email, token);
+    let user;
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('*').eq('username', email).eq('reset_token', token).maybeSingle();
+      if (error) return res.status(500).json({ message: error.message });
+      user = data;
+    } else {
+      user = getDb().prepare('SELECT * FROM users WHERE username = ? AND reset_token = ?').get(email, token);
+    }
     
     if (!user || user.reset_token_expiry < Date.now()) {
       return res.status(400).json({ message: 'Token de recuperação inválido ou expirado.' });
     }
 
     const hash = bcrypt.hashSync(newPassword, 10);
-    getDb().prepare('UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?').run(hash, user.id);
+    if (supabase) {
+      await supabase.from('users').update({ password_hash: hash, reset_token: null, reset_token_expiry: null }).eq('id', user.id);
+    } else {
+      getDb().prepare('UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?').run(hash, user.id);
+    }
     
     res.json({ success: true, message: 'Senha redefinida com sucesso.' });
   });
 
   api.get('/auth/setup-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
-    const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    let user;
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+      user = data;
+    } else {
+      user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    }
     
     const secret = generateSecret();
     const otpauth = generateURI({
@@ -830,7 +893,11 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     });
     const qrCode = await QRCode.toDataURL(otpauth);
 
-    getDb().prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret, userId);
+    if (supabase) {
+      await supabase.from('users').update({ two_factor_secret: secret }).eq('id', userId);
+    } else {
+      getDb().prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret, userId);
+    }
     res.json({ qrCode, secret });
   });
 
@@ -838,7 +905,13 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
     const { code } = req.body;
     
-    const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    let user;
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+      user = data;
+    } else {
+      user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    }
     
     const { valid: isValid } = await verify({
       token: code,
@@ -847,19 +920,33 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
     if (!isValid) return res.status(401).json({ message: 'Código inválido' });
 
-    getDb().prepare('UPDATE users SET two_factor_enabled = 1 WHERE id = ?').run(userId);
+    if (supabase) {
+      await supabase.from('users').update({ two_factor_enabled: 1 }).eq('id', userId);
+    } else {
+      getDb().prepare('UPDATE users SET two_factor_enabled = 1 WHERE id = ?').run(userId);
+    }
     res.json({ success: true });
   });
 
   api.post('/auth/disable-2fa', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
-    getDb().prepare('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?').run(userId);
+    if (supabase) {
+      await supabase.from('users').update({ two_factor_enabled: 0, two_factor_secret: null }).eq('id', userId);
+    } else {
+      getDb().prepare('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?').run(userId);
+    }
     res.json({ success: true });
   });
 
   api.get('/auth/me', authenticate, async (req, res) => {
     const userId = (req as any).user.id;
-    const user = getDb().prepare('SELECT id, username, two_factor_enabled FROM users WHERE id = ?').get(userId);
+    let user;
+    if (supabase) {
+      const { data, error } = await supabase.from('users').select('id, username, two_factor_enabled').eq('id', userId).maybeSingle();
+      user = data;
+    } else {
+      user = getDb().prepare('SELECT id, username, two_factor_enabled FROM users WHERE id = ?').get(userId);
+    }
     res.json(user);
   });
 
@@ -875,24 +962,26 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     });
   }
 
+  // Content API (Moved to API router)
   api.get('/content', async (req, res) => {
     try {
-      let content = [];
-      
+      let content;
+      let source = 'SQLite';
       if (supabase) {
-        console.log(`[API] Fetching content from Supabase...`);
         const { data, error } = await supabase.from('page_content').select('*');
-        if (error) {
-          console.error('Supabase content fetch error:', error.message);
-          // Fallback to SQLite
-          content = getDb().prepare('SELECT * FROM page_content').all();
-        } else {
+        if (!error && data) {
           content = data;
+          source = 'Supabase';
+        } else if (error) {
+          console.warn('Supabase content fetch failed, falling back to SQLite:', error.message);
         }
-      } else {
+      }
+      
+      if (!content) {
         content = getDb().prepare('SELECT * FROM page_content').all();
       }
       
+      console.log(`[API] Returning content from ${source}`);
       const formatted: any = {};
       if (content && Array.isArray(content)) {
         content.forEach((item: any) => {
@@ -909,65 +998,60 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.post('/admin/content', authenticate, async (req, res) => {
     const { section, key, value } = req.body;
-    getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(section, key, value);
+    if (supabase) {
+      const { error } = await supabase
+        .from('page_content')
+        .upsert({ section, key, value }, { onConflict: 'section,key' });
+      if (error) return res.status(500).json({ message: error.message });
+    } else {
+      getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(section, key, value);
+    }
     res.json({ success: true });
   });
 
   api.post('/admin/content/batch', authenticate, async (req, res) => {
     const { updates } = req.body;
     if (!Array.isArray(updates)) return res.status(400).json({ message: 'Updates must be an array' });
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
     
-    // SQLite Persistence
-    try {
-      const transaction = getDb().transaction((items: any) => {
-        for (const item of items) {
-          getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(item.section, item.key, item.value);
-        }
-      });
-      transaction(updates);
-    } catch (sqliteErr) {
-      console.warn('SQLite batch update failed:', sqliteErr);
-    }
-
-    // Supabase Persistence
     if (supabase) {
-      try {
-        console.log(`[API] Saving ${updates.length} items to Supabase...`);
-        // We use upsert with a composite key (section, key)
-        const { error } = await supabase.from('page_content').upsert(updates, { onConflict: 'section,key' });
-        if (error) {
-          console.error('Supabase batch save error:', error.message);
-          // We still return success if SQLite worked, or error if Supabase is critical
-          return res.status(500).json({ message: `Erro ao sincronizar com nuvem: ${error.message}` });
-        }
-      } catch (sbErr) {
-        console.error('Supabase batch save exception:', sbErr);
-      }
-    } else {
-      const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
-      if (isVercel) {
-        return res.status(503).json({ message: 'Cloud Sync inativo. Persistência local indisponível em Vercel.' });
-      }
+      const { error } = await supabase.from('page_content').upsert(updates, { onConflict: 'section,key' });
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
+    }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
+    const transaction = getDb().transaction((items) => {
+      for (const item of items) {
+        getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(item.section, item.key, item.value);
+      }
+    });
+    transaction(updates);
     res.json({ success: true });
   });
 
   api.get('/plans', async (req, res) => {
     try {
-      let plans = [];
+      let plans;
+      let source = 'SQLite';
       if (supabase) {
-        console.log(`[API] Fetching plans from Supabase...`);
         const { data, error } = await supabase.from('plans').select('*').order('order_index', { ascending: true });
-        if (error) {
-          console.error('Supabase plans fetch error:', error.message);
-          plans = getDb().prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
-        } else {
+        if (!error && data) {
           plans = data;
+          source = 'Supabase';
+        } else if (error) {
+          console.warn('Supabase plans fetch failed:', error.message);
         }
-      } else {
+      }
+      
+      if (plans === undefined) {
         plans = getDb().prepare('SELECT * FROM plans ORDER BY order_index ASC').all();
       }
+      
+      console.log(`[API] Returning ${plans?.length || 0} plans from ${source}`);
       res.json(plans || []);
     } catch (err: any) {
       console.error('Error fetching plans:', err);
@@ -979,7 +1063,12 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     try {
       const { id } = req.params;
       const dayOfWeek = new Date().getDay();
-      getDb().prepare('INSERT INTO plan_clicks (plan_id, day_of_week) VALUES (?, ?)').run(id, dayOfWeek);
+      if (supabase) {
+        const { error } = await supabase.from('plan_clicks').insert({ plan_id: id, day_of_week: dayOfWeek });
+        if (error) throw error;
+      } else {
+        getDb().prepare('INSERT INTO plan_clicks (plan_id, day_of_week) VALUES (?, ?)').run(id, dayOfWeek);
+      }
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false });
@@ -988,7 +1077,25 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.get('/admin/stats/plan-clicks', authenticate, async (req, res) => {
     const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    const stats = getDb().prepare(`
+    let stats;
+    
+    if (supabase) {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const { data, error } = await supabase
+        .from('plan_clicks')
+        .select('day_of_week')
+        .gte('click_date', sevenDaysAgo.toISOString().split('T')[0]);
+      
+      if (error) return res.status(500).json({ message: error.message });
+      
+      const counts: any = {};
+      data.forEach((row: any) => {
+        counts[row.day_of_week] = (counts[row.day_of_week] || 0) + 1;
+      });
+      stats = Object.keys(counts).map(key => ({ day_of_week: parseInt(key), count: counts[key] }));
+    } else {
+      stats = getDb().prepare(`
         SELECT 
           day_of_week, 
           COUNT(*) as count 
@@ -996,6 +1103,7 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
         WHERE click_date >= DATE('now', '-7 days')
         GROUP BY day_of_week
       `).all();
+    }
 
     const formattedStats = days.map((day, index) => {
       const stat = Array.isArray(stats) ? stats.find((s: any) => s.day_of_week === index) : null;
@@ -1007,8 +1115,23 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.get('/services', async (req, res) => {
     try {
-      const services = getDb().prepare('SELECT * FROM services ORDER BY order_index ASC').all();
-      console.log(`[API] Returning ${services?.length || 0} services from SQLite`);
+      let services;
+      let source = 'SQLite';
+      if (supabase) {
+        const { data, error } = await supabase.from('services').select('*').order('order_index', { ascending: true });
+        if (!error && data) {
+          services = data;
+          source = 'Supabase';
+        } else if (error) {
+          console.warn('Supabase services fetch failed:', error.message);
+        }
+      }
+      
+      if (services === undefined) {
+        services = getDb().prepare('SELECT * FROM services ORDER BY order_index ASC').all();
+      }
+      
+      console.log(`[API] Returning ${services?.length || 0} services from ${source}`);
       res.json(services || []);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -1019,8 +1142,17 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const { title, description, icon, order_index } = req.body;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
+      if (error) {
+        console.error('[SERVICES] Supabase error:', error.message);
+        return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      }
+      return res.json({ success: true });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     getDb().prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
@@ -1032,8 +1164,15 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const { title, description, icon, order_index } = req.body;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { data, error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id).select();
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Serviço não encontrado no Supabase.' });
+      return res.json({ success: true });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     getDb().prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
@@ -1042,7 +1181,12 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.delete('/admin/services/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    getDb().prepare('DELETE FROM services WHERE id = ?').run(id);
+    if (supabase) {
+      const { error } = await supabase.from('services').delete().eq('id', id);
+      if (error) return res.status(500).json({ message: error.message });
+    } else {
+      getDb().prepare('DELETE FROM services WHERE id = ?').run(id);
+    }
     res.json({ success: true });
   });
 
@@ -1050,8 +1194,14 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     getDb().prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
@@ -1063,8 +1213,22 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('plans')
+        .update({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index, budget_text })
+        .eq('id', id)
+        .select();
+      
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) {
+        return res.status(404).json({ message: 'Plano não encontrado no Supabase. O ID pode ser diferente do SQLite.' });
+      }
+      return res.json({ success: true });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     getDb().prepare('UPDATE plans SET name = ?, description = ?, price = ?, period = ?, features = ?, badge_text = ?, highlight_color = ?, is_featured = ?, cta_text = ?, cta_url = ?, order_index = ?, budget_text = ? WHERE id = ?').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index, budget_text, id);
@@ -1073,15 +1237,53 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.delete('/admin/plans/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    getDb().prepare('DELETE FROM plans WHERE id = ?').run(id);
+    if (supabase) {
+      const { error } = await supabase.from('plans').delete().eq('id', id);
+      if (error) return res.status(500).json({ message: error.message });
+    } else {
+      getDb().prepare('DELETE FROM plans WHERE id = ?').run(id);
+    }
     res.json({ success: true });
   });
 
   // Customers API (Moved to API router)
   api.get('/admin/customers', authenticate, async (req, res) => {
     try {
-      const customers = getDb().prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
-      console.log(`[API] Returning customers from SQLite`);
+      let customers;
+      let source = 'SQLite';
+
+      if (supabase) {
+        console.log('[CUSTOMER] Fetching customers from Supabase');
+        // Fix: Specifically handle PostgREST schema cache issues with fallback logic
+        const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
+        
+        if (error) {
+          console.error('[CUSTOMER] Supabase fetch error:', error.message);
+          
+          // Self-healing: try fetching only known safe columns if event_name is missing in cache
+          if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+            console.warn('[CUSTOMER] Schema mismatch detected, performing fallback fetch...');
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from('customers')
+              .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
+              .order('created_at', { ascending: false });
+              
+            if (!fallbackError && fallbackData) {
+              customers = fallbackData;
+              source = 'Supabase (Fallback)';
+            }
+          }
+        } else if (data) {
+          customers = data;
+          source = 'Supabase';
+        }
+      } 
+      
+      if (customers === undefined) {
+        customers = getDb().prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
+      }
+      
+      console.log(`[API] Returning customers from ${source}`);
       res.json(customers || []);
     } catch (err: any) {
       console.error('[API] customers error:', err);
@@ -1091,8 +1293,25 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   api.get('/admin/customers/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    const customer = getDb().prepare('SELECT * FROM customers WHERE id = ?').get(id);
-    res.json(customer || null);
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('customers').select('*').eq('id', id).maybeSingle();
+        if (error) {
+          if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema')) {
+            const { data: fallback, error: fallbackErr } = await supabase.from('customers').select('id, name, location, event_date, budget, cost, status, plan_id, created_at').eq('id', id).maybeSingle();
+            if (fallbackErr) return res.status(500).json({ message: fallbackErr.message });
+            return res.json(fallback);
+          }
+          return res.status(500).json({ message: error.message });
+        }
+        res.json(data);
+      } catch (err: any) {
+        res.status(500).json({ message: err.message });
+      }
+    } else {
+      const customer = getDb().prepare('SELECT * FROM customers WHERE id = ?').get(id);
+      res.json(customer || null);
+    }
   });
 
   api.post('/admin/customers', authenticate, async (req, res) => {
@@ -1104,9 +1323,43 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const numericPlanId = plan_id ? parseInt(plan_id) : null;
 
     console.log(`[CUSTOMER] Creating new customer: ${name} / Event: ${event_name} (${email})`);
-    getDb().prepare('INSERT INTO customers (name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-      name, event_name, location, event_date, numericBudget, numericCost, status || 'Pendente', start_date, end_date, phone, email, numericPlanId
-    );
+    if (supabase) {
+      const payload = { 
+        name, event_name, location, event_date, 
+        budget: numericBudget, 
+        cost: numericCost, 
+        status: status || 'Pendente', 
+        start_date, end_date, phone, email, 
+        plan_id: numericPlanId 
+      };
+
+      const { error } = await supabase.from('customers').insert(payload);
+      
+      if (error) {
+        console.error('[CUSTOMER] Supabase insert error:', error.message);
+        
+        // Self-healing: if column not found, try without event_name and other new columns
+        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+          console.warn('[CUSTOMER] Attempting fallback insert due to schema error...');
+          const fallbackPayload = { 
+            name, location, event_date, 
+            budget: numericBudget, 
+            cost: numericCost, 
+            status: status || 'Pendente', 
+            plan_id: numericPlanId 
+          };
+          const { error: fallbackError } = await supabase.from('customers').insert(fallbackPayload);
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}. Please add missing columns to Supabase table 'customers' (event_name, phone, email, start_date, end_date) and refresh schema cache.` });
+          return res.json({ success: true, warning: 'Saved without some fields due to schema mismatch.' });
+        }
+        
+        return res.status(500).json({ message: error.message });
+      }
+    } else {
+      getDb().prepare('INSERT INTO customers (name, event_name, location, event_date, budget, cost, status, start_date, end_date, phone, email, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        name, event_name, location, event_date, numericBudget, numericCost, status || 'Pendente', start_date, end_date, phone, email, numericPlanId
+      );
+    }
     res.json({ success: true });
   });
 
@@ -1119,23 +1372,81 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const numericCost = parseFloat(cost) || 0;
     const numericPlanId = plan_id ? parseInt(plan_id) : null;
 
-    getDb().prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
-      name, event_name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
-    );
+    if (supabase) {
+      const payload = { 
+        name, event_name, location, event_date, 
+        budget: numericBudget, 
+        cost: numericCost, 
+        status, start_date, end_date, phone, email, 
+        plan_id: numericPlanId 
+      };
+
+      const { data, error } = await supabase.from('customers').update(payload).eq('id', id).select();
+      
+      if (error) {
+        console.error('[CUSTOMER] Supabase update error:', error.message);
+        
+        // Self-healing fallback for missing columns
+        if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
+          console.warn('[CUSTOMER] Attempting fallback update due to schema error...');
+          const fallbackPayload = { 
+            name, location, event_date, 
+            budget: numericBudget, 
+            cost: numericCost, 
+            status, 
+            plan_id: numericPlanId 
+          };
+          const { data: fbData, error: fallbackError } = await supabase.from('customers').update(fallbackPayload).eq('id', id).select();
+          if (fallbackError) return res.status(500).json({ message: `Fallback failed: ${fallbackError.message}.` });
+          if (!fbData || fbData.length === 0) return res.status(404).json({ message: 'Cliente não encontrado no Supabase (fallback).' });
+          return res.json({ success: true, warning: 'Updated without some fields due to schema mismatch.' });
+        }
+        
+        return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      }
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Cliente não encontrado no Supabase.' });
+      return res.json({ success: true });
+    } else {
+      getDb().prepare('UPDATE customers SET name = ?, event_name = ?, location = ?, event_date = ?, budget = ?, cost = ?, status = ?, start_date = ?, end_date = ?, phone = ?, email = ?, plan_id = ? WHERE id = ?').run(
+        name, event_name, location, event_date, numericBudget, numericCost, status, start_date, end_date, phone, email, numericPlanId, id
+      );
+    }
     res.json({ success: true });
   });
 
   api.delete('/admin/customers/:id', authenticate, async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ message: 'ID inválido' });
-    getDb().prepare('DELETE FROM customers WHERE id = ?').run(id);
+
+    if (supabase) {
+      const { error } = await supabase.from('customers').delete().eq('id', id);
+      if (error) return res.status(500).json({ message: error.message });
+    } else {
+      getDb().prepare('DELETE FROM customers WHERE id = ?').run(id);
+    }
     res.json({ success: true });
   });
 
   // Inventory API (Moved to API router)
   api.get('/admin/inventory', authenticate, async (req, res) => {
     try {
-      const items = getDb().prepare('SELECT * FROM inventory ORDER BY created_at DESC').all();
+      let items;
+      let source = 'SQLite';
+      
+      if (supabase) {
+        const { data, error } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
+        if (!error && data) {
+          items = data;
+          source = 'Supabase';
+        } else if (error) {
+          console.warn('[INVENTORY] Supabase fetch failed:', error.message);
+        }
+      }
+      
+      if (items === undefined) {
+        items = getDb().prepare('SELECT * FROM inventory ORDER BY created_at DESC').all();
+      }
+      
       res.json(items || []);
     } catch (err: any) {
       console.error('[API] inventory error:', err);
@@ -1148,8 +1459,14 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const numericPrice = parseFloat(price) || 0;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { data, error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status: status || 'Ativo' }).select();
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true, id: data?.[0]?.id });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     const result = getDb().prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
@@ -1162,8 +1479,15 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const numericPrice = parseFloat(price) || 0;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { data, error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status }).eq('id', id).select();
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Item não encontrado no Supabase.' });
+      return res.json({ success: true });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     getDb().prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status, id);
@@ -1174,8 +1498,15 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     const { id } = req.params;
     const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
 
+    if (supabase) {
+      const { data, error } = await supabase.from('inventory').delete().eq('id', id).select();
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      if (!data || data.length === 0) return res.status(404).json({ message: 'Item não encontrado no Supabase.' });
+      return res.json({ success: true });
+    }
+    
     if (isVercel) {
-      return res.status(503).json({ message: 'Persistência indisponível: Banco de dados local em ambiente serverless.' });
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
     }
 
     getDb().prepare('DELETE FROM inventory WHERE id = ?').run(id);
@@ -1232,6 +1563,11 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
       console.error('SQLite table initialization failed:', err);
     }
 
+    // Initialize Supabase synchronously (wait for it before starting server)
+    const client = await initSupabase();
+    supabase = client;
+    console.log(`Supabase state: ${!!supabase ? 'Active' : 'Inactive'}`);
+
     // Background seeding (don't block server start for full seeding)
     (async () => {
       try {
@@ -1240,6 +1576,20 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
         await seedPageContent();
         await seedPlans();
         await seedServices();
+        
+        if (supabase) {
+          // Sync checks...
+          const { data: supCustomers } = await supabase.from('customers').select('id').limit(1);
+          if (!supCustomers || supCustomers.length === 0) {
+            const localCustomers = getDb().prepare('SELECT * FROM customers').all();
+            if (localCustomers.length > 0) await supabase.from('customers').insert(localCustomers);
+          }
+          const { data: supInv } = await supabase.from('inventory').select('id').limit(1);
+          if (!supInv || supInv.length === 0) {
+            const localInv = getDb().prepare('SELECT * FROM inventory').all();
+            if (localInv.length > 0) await supabase.from('inventory').insert(localInv);
+          }
+        }
         console.log('Initialization finished.');
       } catch (err) {
         console.error('Background seeding error:', err);
