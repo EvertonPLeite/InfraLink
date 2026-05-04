@@ -716,27 +716,52 @@ async function startServer() {
         user = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username);
       }
       
-      if (!user) {
-        console.log(`Login failed: user ${username} not found`);
-        return res.status(401).json({ message: 'Credenciais inválidas' });
-      }
-
-      if (!bcrypt.compareSync(password, user.password_hash)) {
-        console.log(`Login failed: invalid password for ${username}`);
-        return res.status(401).json({ message: 'Credenciais inválidas' });
-      }
-
-      if (!user.two_factor_enabled) {
-        const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1d' });
-        return res.json({ token, requires2FA: false });
-      }
-
-      res.json({ requires2FA: true, userId: user.id });
-    } catch (error: any) {
-      console.error('API Error: /auth/login', error);
-      res.status(500).json({ message: `Erro interno: ${error.message}` });
+    if (!user) {
+      console.log(`Login failed: user ${username} not found`);
+      return res.status(401).json({ message: 'Credenciais inválidas' });
     }
-  });
+
+    if (!bcrypt.compareSync(password, user.password_hash)) {
+      console.log(`Login failed: invalid password for ${username}`);
+      return res.status(401).json({ message: 'Credenciais inválidas' });
+    }
+
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1d' });
+    
+    // Check if 2FA is actually possible (secret exists)
+    if (!user.two_factor_enabled || !user.two_factor_secret) {
+      return res.json({ token, requires2FA: false });
+    }
+
+    res.json({ requires2FA: true, userId: user.id });
+  } catch (error: any) {
+    console.error('API Error: /auth/login', error);
+    res.status(500).json({ message: `Erro interno: ${error.message}` });
+  }
+});
+
+api.get('/admin/system-status', authenticate, async (req, res) => {
+  const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+  
+  const status = {
+    environment: process.env.NODE_ENV,
+    isVercel,
+    supabase: {
+      active: !!supabase,
+      url: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : 'not-set',
+      hasAnonKey: !!SUPABASE_KEY,
+      hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY
+    },
+    sqlite: {
+      type: Database ? 'native (better-sqlite3)' : 'mock (memory-only)',
+      path: isVercel ? '/tmp/database.sqlite' : 'database.sqlite'
+    },
+    time: new Date().toISOString()
+  };
+  
+  res.json(status);
+});
+
 
   api.post('/auth/verify-2fa', async (req, res) => {
     const { userId, code } = req.body;
@@ -982,18 +1007,24 @@ async function startServer() {
   api.post('/admin/content/batch', authenticate, async (req, res) => {
     const { updates } = req.body;
     if (!Array.isArray(updates)) return res.status(400).json({ message: 'Updates must be an array' });
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
     
     if (supabase) {
       const { error } = await supabase.from('page_content').upsert(updates, { onConflict: 'section,key' });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      const transaction = getDb().transaction((items) => {
-        for (const item of items) {
-          getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(item.section, item.key, item.value);
-        }
-      });
-      transaction(updates);
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    const transaction = getDb().transaction((items) => {
+      for (const item of items) {
+        getDb().prepare('INSERT OR REPLACE INTO page_content (section, key, value) VALUES (?, ?, ?)').run(item.section, item.key, item.value);
+      }
+    });
+    transaction(updates);
     res.json({ success: true });
   });
 
@@ -1104,24 +1135,41 @@ async function startServer() {
 
   api.post('/admin/services', authenticate, async (req, res) => {
     const { title, description, icon, order_index } = req.body;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
       const { error } = await supabase.from('services').insert({ title, description, icon: icon || 'Wifi', order_index: order_index || 0 });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
+      if (error) {
+        console.error('[SERVICES] Supabase error:', error.message);
+        return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      }
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('INSERT INTO services (title, description, icon, order_index) VALUES (?, ?, ?, ?)').run(title, description, icon || 'Wifi', order_index || 0);
     res.json({ success: true });
   });
 
   api.put('/admin/services/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { title, description, icon, order_index } = req.body;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
       const { error } = await supabase.from('services').update({ title, description, icon, order_index }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('UPDATE services SET title = ?, description = ?, icon = ?, order_index = ? WHERE id = ?').run(title, description, icon, order_index, id);
     res.json({ success: true });
   });
 
@@ -1138,12 +1186,19 @@ async function startServer() {
 
   api.post('/admin/plans', authenticate, async (req, res) => {
     const { name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text } = req.body;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
       const { error } = await supabase.from('plans').insert({ name, description, price, period, features, badge_text, highlight_color, is_featured: is_featured || 0, cta_text, cta_url, order_index: order_index || 0, budget_text });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('INSERT INTO plans (name, description, price, period, features, badge_text, highlight_color, is_featured, cta_text, cta_url, order_index, budget_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, description, price, period, features, badge_text, highlight_color, is_featured || 0, cta_text, cta_url, order_index || 0, budget_text);
     res.json({ success: true });
   });
 
@@ -1362,12 +1417,19 @@ async function startServer() {
   api.post('/admin/inventory', authenticate, async (req, res) => {
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
     const numericPrice = parseFloat(price) || 0;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
       const { error } = await supabase.from('inventory').insert({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status: status || 'Ativo' });
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('INSERT INTO inventory (name, brand, purchase_date, serial_number, supplier, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status || 'Ativo');
     res.json({ success: true });
   });
 
@@ -1375,23 +1437,37 @@ async function startServer() {
     const { id } = req.params;
     const { name, brand, purchase_date, serial_number, supplier, price, status } = req.body;
     const numericPrice = parseFloat(price) || 0;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
       const { error } = await supabase.from('inventory').update({ name, brand, purchase_date, serial_number, supplier, price: numericPrice, status }).eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status, id);
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('UPDATE inventory SET name = ?, brand = ?, purchase_date = ?, serial_number = ?, supplier = ?, price = ?, status = ? WHERE id = ?').run(name, brand, purchase_date, serial_number, supplier, numericPrice, status, id);
     res.json({ success: true });
   });
 
   api.delete('/admin/inventory/:id', authenticate, async (req, res) => {
     const { id } = req.params;
+    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+
     if (supabase) {
       const { error } = await supabase.from('inventory').delete().eq('id', id);
-      if (error) return res.status(500).json({ message: error.message });
-    } else {
-      getDb().prepare('DELETE FROM inventory WHERE id = ?').run(id);
+      if (error) return res.status(500).json({ message: `Supabase Error: ${error.message}` });
+      return res.json({ success: true });
     }
+    
+    if (isVercel) {
+      return res.status(503).json({ message: 'Persistência indisponível: Supabase não conectado em ambiente de produção.' });
+    }
+
+    getDb().prepare('DELETE FROM inventory WHERE id = ?').run(id);
     res.json({ success: true });
   });
 

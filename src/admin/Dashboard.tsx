@@ -2091,6 +2091,15 @@ function DashboardHome() {
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [systemStatus, setSystemStatus] = useState<any>(null);
+
+  useEffect(() => {
+    safeFetch('/api/admin/system-status', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(status => setSystemStatus(status))
+      .catch(err => console.error('Status check failed:', err));
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -2153,6 +2162,31 @@ export default function Dashboard() {
       {/* Content */}
       <main className="flex-grow p-8 md:p-16 h-screen overflow-y-auto relative z-10">
          <div className="max-w-4xl mx-auto">
+            {systemStatus && systemStatus.isVercel && !systemStatus.supabase?.active && (
+              <div className="mb-8 p-6 bg-red-500/10 border border-red-500/30 rounded-3xl flex items-start gap-4 animate-in fade-in slide-in-from-top duration-700">
+                <div className="p-3 bg-red-500/20 rounded-2xl text-red-500">
+                  <Database size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-red-500 mb-1">Atenção: Banco de Dados Não Persistente</h3>
+                  <p className="text-white/60 text-sm leading-relaxed mb-3">
+                    O Supabase não foi detectado ou configurado. Em modo produção (Vercel), as alterações que você fizer serão **perdidas** assim que o servidor reiniciar.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Erro de persistência</span>
+                    <span className="text-[10px] text-white/30 italic">Verifique as variáveis SUPABASE_URL e SUPABASE_ANON_KEY no Vercel.</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {systemStatus && systemStatus.supabase?.active && (
+              <div className="mb-8 p-4 bg-brand-neon/5 border border-brand-neon/10 rounded-2xl flex items-center gap-3">
+                <div className="w-2 h-2 bg-brand-neon rounded-full animate-pulse shadow-[0_0_8px_rgba(0,255,136,0.5)]" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-neon/60">Cloud Sync Ativo: Supabase Conectado</span>
+              </div>
+            )}
+
             <Routes>
               <Route path="/" element={<DashboardHome />} />
               <Route path="analytics" element={<Analytics />} />
