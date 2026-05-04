@@ -35,21 +35,28 @@ const iconMap: any = {
 
 export default function Services() {
   const [services, setServices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    safeFetch(`/api/services?t=${Date.now()}`)
-      .then(data => {
+    const fetchServices = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await safeFetch(`/api/services?t=${Date.now()}`);
         if (Array.isArray(data)) {
           setServices(data);
         } else {
-          console.error('Data received for services is not an array:', data);
           setServices([]);
         }
-      })
-      .catch(err => {
+      } catch (err: any) {
         console.error('Failed to fetch services:', err);
-        setServices([]);
-      });
+        setError(err.message || 'Falha ao carregar serviços.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchServices();
   }, []);
 
   return (
@@ -68,8 +75,30 @@ export default function Services() {
           </p>
         </div>
 
-        <div className="flex flex-wrap justify-center gap-6">
-          {services.map((service, index) => {
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+             <div className="relative">
+                <Radio className="text-brand-blue animate-pulse" size={40} />
+                <div className="absolute inset-0 bg-brand-blue/20 blur-xl rounded-full animate-ping" />
+             </div>
+             <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Sincronizando Serviços...</p>
+          </div>
+        ) : error ? (
+           <div className="p-12 glass-panel rounded-3xl border-red-500/20 text-center max-w-lg mx-auto">
+              <Activity className="text-red-500 mx-auto mb-4" size={40} />
+              <p className="text-white/70 font-bold mb-4">{error}</p>
+              <button 
+                onClick={() => window.location.reload()}
+                className="text-brand-blue text-xs font-black uppercase tracking-widest border-b border-brand-blue hover:text-white hover:border-white transition-all"
+              >
+                Tentar Novamente
+              </button>
+           </div>
+        ) : services.length === 0 ? (
+          <div className="text-center py-20 text-white/30 italic">Nenhum serviço listado.</div>
+        ) : (
+          <div className="flex flex-wrap justify-center gap-6">
+            {services.map((service, index) => {
             const iconName = service.icon || service.title;
             const IconComponent = iconMap[iconName] || iconMap[Object.keys(iconMap).find(k => iconName.includes(k)) || ''] || Wifi;
             
@@ -94,6 +123,7 @@ export default function Services() {
             );
           })}
         </div>
+        )}
       </div>
     </section>
   );

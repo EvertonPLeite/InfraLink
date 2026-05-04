@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Check, ArrowUpRight, Zap } from 'lucide-react';
+import { Check, ArrowUpRight, Zap, Loader2, Activity } from 'lucide-react';
 import { safeFetch } from '../lib/fetch';
 
 interface Plan {
@@ -21,27 +21,33 @@ interface Plan {
 
 export default function Plans() {
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('Fetching plans...');
-    safeFetch(`/api/plans?t=${Date.now()}`)
-      .then(data => {
-        console.log('Plans data received:', data);
+    const fetchPlans = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await safeFetch(`/api/plans?t=${Date.now()}`);
         if (Array.isArray(data)) {
           setPlans(data);
         } else {
-          console.error('Data received for plans is not an array:', data);
           setPlans([]);
         }
-      })
-      .catch(err => {
+      } catch (err: any) {
         console.error('Failed to fetch plans:', err);
-        setPlans([]); // Ensure it's an empty array on error
-      });
+        setError(err.message || 'Falha ao carregar planos.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPlans();
   }, []);
 
   return (
     <section id="planos" className="py-32 px-6 md:px-12 border-y border-white/5 relative overflow-hidden">
+      {/* ... existing stars and background ... */}
       <div className="absolute top-0 left-1/4 w-96 h-96 bg-brand-neon/5 rounded-full blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-brand-blue/5 rounded-full blur-[120px] pointer-events-none"></div>
       
@@ -59,8 +65,25 @@ export default function Plans() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
-          {plans.map((plan, index) => {
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4 animate-in fade-in duration-500">
+            <Loader2 className="animate-spin text-brand-neon w-10 h-10" />
+            <p className="text-white/40 text-xs font-black uppercase tracking-widest animate-pulse">Carregando Planos...</p>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center glass-panel rounded-[2rem] border-red-500/20 max-w-lg mx-auto">
+             <Activity className="text-red-500 mb-4" size={40} />
+             <h3 className="text-xl font-bold mb-2">Ops! Falha ao carregar planos.</h3>
+             <p className="text-white/40 text-sm mb-6">{error}</p>
+             <button onClick={() => window.location.reload()} className="bg-brand-neon text-brand-black px-8 py-3 rounded-xl font-bold transition-all hover:scale-105">Tentar Novamente</button>
+          </div>
+        ) : plans.length === 0 ? (
+          <div className="text-center py-20">
+             <p className="text-white/40 italic">Nenhum plano disponível no momento.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
+            {plans.map((plan, index) => {
             const isFeatured = plan.is_featured === 1;
             const features = plan.features ? plan.features.split(',') : [];
             const highlightColor = plan.highlight_color || '#00FF88';
@@ -160,6 +183,7 @@ export default function Plans() {
             );
           })}
         </div>
+        )}
         <div className="mt-20 text-center">
             <p className="text-white/20 text-xs font-medium">
               Todos os planos incluem contrato, nota fiscal e garantia de SLA. Precisa de algo personalizado? <a href="#contato" className="text-brand-neon hover:underline">Fale conosco.</a>

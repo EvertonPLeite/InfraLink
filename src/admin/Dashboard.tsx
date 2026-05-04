@@ -2110,10 +2110,13 @@ function DashboardHome() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       const headers = { 'Authorization': `Bearer ${localStorage.getItem('token')}` };
+      setLoading(true);
+      setError(null);
       try {
         const [cusData, invData] = await Promise.all([
           safeFetch('/api/admin/customers', { headers }),
@@ -2122,8 +2125,9 @@ function DashboardHome() {
         
         setCustomers(Array.isArray(cusData) ? cusData : []);
         setInventory(Array.isArray(invData) ? invData : []);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+      } catch (err: any) {
+        console.error('Error fetching dashboard data:', err);
+        setError(err.message || 'Falha ao carregar dados do painel.');
       } finally {
         setLoading(false);
       }
@@ -2132,10 +2136,37 @@ function DashboardHome() {
     fetchData();
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-neon" /></div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center h-96 gap-4 animate-in fade-in duration-500">
+      <div className="relative">
+        <Loader2 className="animate-spin text-brand-neon w-12 h-12" />
+        <div className="absolute inset-0 bg-brand-neon/20 blur-xl rounded-full animate-pulse" />
+      </div>
+      <p className="text-white/40 text-xs font-black uppercase tracking-[0.2em] animate-pulse">Carregando métricas...</p>
+    </div>
+  );
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-12 pb-12">
+      {error && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-center gap-4 text-red-500"
+        >
+          <Activity size={24} />
+          <div className="flex-grow">
+            <p className="text-sm font-bold">{error}</p>
+            <p className="text-[10px] text-white/40 font-medium">Tente atualizar a página ou verifique sua conexão.</p>
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-red-500/20 rounded-xl text-xs font-bold hover:bg-red-500/30 transition-all"
+          >
+            Tentar Novamente
+          </button>
+        </motion.div>
+      )}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
            <h2 className="text-3xl font-black tracking-tighter mb-2">Bem-vindo, <span className="text-brand-neon">Administrador</span></h2>
@@ -2277,7 +2308,12 @@ export default function Dashboard() {
                     <div className="flex-grow text-center md:text-left">
                       <h3 className="text-lg font-bold text-red-500 mb-1">Banco de Dados Offline</h3>
                       <p className="text-white/60 text-xs leading-relaxed">
-                        As alterações serão perdidas após reiniciar o servidor. Configure o Supabase para persistir seus dados.
+                        O painel está operando em modo local (SQLite). As alterações não serão sincronizadas com a nuvem.
+                        {(!systemStatus.supabase?.url || systemStatus.supabase?.url === 'not-set') 
+                          ? ' A URL do Supabase não foi encontrada no ambiente.' 
+                          : !systemStatus.supabase?.hasAnonKey 
+                            ? ' A chave API (Anon Key) do Supabase está ausente.' 
+                            : ' A conexão falhou. Verifique se a chave service_role está correta e se o banco está acessível.'}
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 min-w-[200px]">
