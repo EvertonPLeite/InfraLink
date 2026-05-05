@@ -5,6 +5,7 @@ import Hero from './components/Hero';
 import Services from './components/Services';
 import Plans from './components/Plans';
 import Contact from './components/Contact';
+import ChatBot from './components/ChatBot';
 import Login from './admin/Login';
 import Dashboard from './admin/Dashboard';
 import ResetPassword from './admin/ResetPassword';
@@ -45,6 +46,7 @@ function LandingPage() {
           <Plans />
           <Contact />
         </main>
+        <ChatBot />
         <footer className="py-20 border-t border-white/5 bg-black/50 px-6 relative z-10">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
           <div className="text-center md:text-left">
