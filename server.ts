@@ -741,30 +741,25 @@ async function startServer() {
 });
 
 api.get('/admin/system-status', authenticate, async (req, res) => {
-  try {
-    const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
-    
-    const status = {
-      environment: process.env.NODE_ENV,
-      isVercel,
-      supabase: {
-        active: !!supabase,
-        url: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : 'not-set',
-        hasAnonKey: !!SUPABASE_KEY,
-        hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY
-      },
-      sqlite: {
-        type: Database ? 'native (better-sqlite3)' : 'mock (memory-only)',
-        path: isVercel ? '/tmp/database.sqlite' : 'database.sqlite'
-      },
-      time: new Date().toISOString()
-    };
-    
-    res.json(status);
-  } catch (err: any) {
-    console.error('[API] system-status error:', err);
-    res.status(500).json({ message: err.message });
-  }
+  const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+  
+  const status = {
+    environment: process.env.NODE_ENV,
+    isVercel,
+    supabase: {
+      active: !!supabase,
+      url: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : 'not-set',
+      hasAnonKey: !!SUPABASE_KEY,
+      hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY
+    },
+    sqlite: {
+      type: Database ? 'native (better-sqlite3)' : 'mock (memory-only)',
+      path: isVercel ? '/tmp/database.sqlite' : 'database.sqlite'
+    },
+    time: new Date().toISOString()
+  };
+  
+  res.json(status);
 });
 
 
@@ -1248,13 +1243,10 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   // Customers API (Moved to API router)
   api.get('/admin/customers', authenticate, async (req, res) => {
-    try {
-      let customers;
-      let source = 'SQLite';
-
-      if (supabase) {
-        console.log('[CUSTOMER] Fetching customers from Supabase');
-        // Fix: Specifically handle PostgREST schema cache issues with fallback logic
+    if (supabase) {
+      console.log('[CUSTOMER] Fetching customers from Supabase');
+      // Fix: Specifically handle PostgREST schema cache issues with fallback logic
+      try {
         const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
         
         if (error) {
@@ -1263,31 +1255,33 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
           // Self-healing: try fetching only known safe columns if event_name is missing in cache
           if (error.message.toLowerCase().includes('column') || error.message.toLowerCase().includes('schema') || error.message.toLowerCase().includes('cache')) {
             console.warn('[CUSTOMER] Schema mismatch detected, performing fallback fetch...');
+            // Try without event_name first
             const { data: fallbackData, error: fallbackError } = await supabase
               .from('customers')
               .select('id, name, location, event_date, budget, cost, status, plan_id, created_at, phone, email')
               .order('created_at', { ascending: false });
               
-            if (!fallbackError && fallbackData) {
-              customers = fallbackData;
-              source = 'Supabase (Fallback)';
-            }
+            if (!fallbackError) return res.json(fallbackData);
+            
+            // If that fails, try truly minimal
+            const { data: minimalData, error: minimalError } = await supabase
+              .from('customers')
+              .select('id, name, location, event_date, budget, cost, status, plan_id, created_at')
+              .order('created_at', { ascending: false });
+            
+            if (minimalError) return res.status(500).json({ message: minimalError.message });
+            return res.json(minimalData);
           }
-        } else if (data) {
-          customers = data;
-          source = 'Supabase';
+          return res.status(500).json({ message: error.message });
         }
-      } 
-      
-      if (customers === undefined) {
-        customers = getDb().prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
+        return res.json(data);
+      } catch (err: any) {
+        console.error('[CUSTOMER] Fetch exception:', err);
+        return res.status(500).json({ message: err.message });
       }
-      
-      console.log(`[API] Returning customers from ${source}`);
-      res.json(customers || []);
-    } catch (err: any) {
-      console.error('[API] customers error:', err);
-      res.status(500).json({ message: err.message });
+    } else {
+      const customers = getDb().prepare('SELECT * FROM customers ORDER BY created_at DESC').all();
+      res.json(customers);
     }
   });
 
@@ -1429,28 +1423,13 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   // Inventory API (Moved to API router)
   api.get('/admin/inventory', authenticate, async (req, res) => {
-    try {
-      let items;
-      let source = 'SQLite';
-      
-      if (supabase) {
-        const { data, error } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
-        if (!error && data) {
-          items = data;
-          source = 'Supabase';
-        } else if (error) {
-          console.warn('[INVENTORY] Supabase fetch failed:', error.message);
-        }
-      }
-      
-      if (items === undefined) {
-        items = getDb().prepare('SELECT * FROM inventory ORDER BY created_at DESC').all();
-      }
-      
-      res.json(items || []);
-    } catch (err: any) {
-      console.error('[API] inventory error:', err);
-      res.status(500).json({ message: err.message });
+    if (supabase) {
+      const { data, error } = await supabase.from('inventory').select('*').order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ message: error.message });
+      res.json(data);
+    } else {
+      const items = getDb().prepare('SELECT * FROM inventory ORDER BY created_at DESC').all();
+      res.json(items);
     }
   });
 
@@ -1513,16 +1492,6 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
     res.json({ success: true });
   });
 
-  // Global Error Handler for API router (MUST BE AFTER ROUTES)
-  api.use((err: any, req: any, res: any, next: any) => {
-    console.error('[API ERROR CALLBACK]', err);
-    res.status(500).json({ 
-      message: err.message || 'Internal Server Error',
-      path: req.url,
-      method: req.method
-    });
-  });
-
   // --- API Fallback ---
   api.all('/*', (req, res) => {
     console.log(`[API-404] Not Found: ${req.method} ${req.url}`);
@@ -1552,61 +1521,76 @@ api.get('/admin/system-status', authenticate, async (req, res) => {
 
   console.log('Registering routes...');
 
-  // 5. Initialize Databases and Seed (Eager startup)
-  try {
-    console.log('Initializing databases...');
-    
-    // SQLite Tables should be created synchronously and early
+  const initLogic = async () => {
+    console.log('Starting background initialization...');
     try {
-      initSqliteTables();
-    } catch (err) {
-      console.error('SQLite table initialization failed:', err);
-    }
-
-    // Initialize Supabase synchronously (wait for it before starting server)
-    const client = await initSupabase();
-    supabase = client;
-    console.log(`Supabase state: ${!!supabase ? 'Active' : 'Inactive'}`);
-
-    // Background seeding (don't block server start for full seeding)
-    (async () => {
+      // Initialize Supabase in the background
       try {
-        console.log('Seeding initial data...');
+        const client = await initSupabase();
+        supabase = client;
+        console.log(`Supabase background initialization finished. Active: ${!!supabase}`);
+      } catch (err) {
+        console.error('Supabase background initialization failed:', err);
+      }
+      
+      // Initialize SQLite tables safely
+      try {
+        initSqliteTables();
+      } catch (err) {
+        console.error('SQLite table initialization failed:', err);
+      }
+
+      // Seed data safely & Sync
+      try {
         await seedUsers();
         await seedPageContent();
         await seedPlans();
         await seedServices();
-        
-        if (supabase) {
-          // Sync checks...
-          const { data: supCustomers } = await supabase.from('customers').select('id').limit(1);
-          if (!supCustomers || supCustomers.length === 0) {
-            const localCustomers = getDb().prepare('SELECT * FROM customers').all();
-            if (localCustomers.length > 0) await supabase.from('customers').insert(localCustomers);
-          }
-          const { data: supInv } = await supabase.from('inventory').select('id').limit(1);
-          if (!supInv || supInv.length === 0) {
-            const localInv = getDb().prepare('SELECT * FROM inventory').all();
-            if (localInv.length > 0) await supabase.from('inventory').insert(localInv);
-          }
-        }
-        console.log('Initialization finished.');
-      } catch (err) {
-        console.error('Background seeding error:', err);
-      }
-    })();
 
-  } catch (err) {
-    console.error('Database initialization error:', err);
-  }
+        // One-way sync for Customers and Inventory if Supabase is active
+        if (supabase) {
+           console.log('Checking if customers need sync to Supabase...');
+           const { data: supCustomers, error: supErr } = await supabase.from('customers').select('id').limit(1);
+           if (!supErr && (!supCustomers || supCustomers.length === 0)) {
+              console.log('Supabase customers table is empty. Syncing from SQLite...');
+              const localCustomers = getDb().prepare('SELECT * FROM customers').all();
+              if (localCustomers.length > 0) {
+                 const { error: syncErr } = await supabase.from('customers').insert(localCustomers);
+                 if (syncErr) console.error('Failed to sync customers to Supabase:', syncErr.message);
+              }
+           }
+
+           console.log('Checking if inventory needs sync to Supabase...');
+           const { data: supInv, error: invErr } = await supabase.from('inventory').select('id').limit(1);
+           if (!invErr && (!supInv || supInv.length === 0)) {
+              console.log('Supabase inventory table is empty. Syncing from SQLite...');
+              const localInv = getDb().prepare('SELECT * FROM inventory').all();
+              if (localInv.length > 0) {
+                 const { error: syncErr } = await supabase.from('inventory').insert(localInv);
+                 if (syncErr) console.error('Failed to sync inventory to Supabase:', syncErr.message);
+              }
+           }
+        }
+
+        console.log('Seeding and Syncing finished.');
+      } catch (err) {
+        console.error('Seeding background tasks failed:', err);
+      }
+    } catch (err) {
+      console.error('Global initLogic error:', err);
+    }
+  };
 
   if (process.env.VERCEL === '1' || !!process.env.VERCEL) {
-    console.log('Vercel environment detected. Server ready.');
+    console.log('Vercel environment detected. Skipping listen but initializing background tasks.');
+    initLogic().catch(err => console.error('initLogic background error:', err));
     return;
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log('Routes registered and server is listening.');
+    initLogic().catch(err => console.error('initLogic background error:', err));
   });
 }
 
